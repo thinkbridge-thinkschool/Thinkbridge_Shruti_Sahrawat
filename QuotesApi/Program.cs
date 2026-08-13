@@ -1,4 +1,7 @@
-using Serilog;
+﻿using Serilog;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+using OpenTelemetry.Exporter;
 using QuotesApi.Services;
 using QuotesApi.Repositories;
 using Microsoft.EntityFrameworkCore;
@@ -13,6 +16,21 @@ builder.Host.UseSerilog((context, services, configuration) => configuration
     .Enrich.FromLogContext()
     .WriteTo.Console(outputTemplate:
         "[{Timestamp:HH:mm:ss} {Level:u3}] {SourceContext}{NewLine}      TraceId={TraceId} {Message:lj}{NewLine}{Exception}"));
+
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(r => r.AddService(
+        serviceName: "QuotesApi",
+        serviceVersion: "1.0.0"))
+    .WithTracing(t => t
+        .AddAspNetCoreInstrumentation()
+        .AddEntityFrameworkCoreInstrumentation()
+        .AddHttpClientInstrumentation()
+        .AddConsoleExporter()
+        .AddOtlpExporter(o =>
+        {
+            o.Endpoint = new Uri("http://localhost:4317");
+            o.Protocol = OtlpExportProtocol.Grpc;
+        }));
 
 builder.Services.AddControllers();
 builder.Services.AddInfrastructure(builder.Configuration);
