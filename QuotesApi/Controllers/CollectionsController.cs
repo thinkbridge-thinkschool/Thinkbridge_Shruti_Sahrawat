@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using QuotesApi.Domain;
 using QuotesApi.DTOs;
 using QuotesApi.Repositories;
@@ -12,6 +12,13 @@ public class CollectionsController : ControllerBase
     private readonly ICollectionRepository _repository;
 
     public CollectionsController(ICollectionRepository repository) => _repository = repository;
+
+    [HttpGet]
+    public async Task<IActionResult> GetAll(CancellationToken cancellationToken)
+    {
+        var collections = await _repository.GetAllAsync(cancellationToken);
+        return Ok(collections);
+    }
 
     [HttpPost]
     public async Task<IActionResult> CreateCollection([FromBody] CreateCollectionDto dto, CancellationToken cancellationToken)

@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using QuotesApi.Domain;
 using QuotesApi.Data;
 
@@ -7,6 +7,7 @@ namespace QuotesApi.Repositories;
 public interface ICollectionRepository
 {
     Task<Collection?> GetByIdAsync(int id, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Collection>> GetAllAsync(CancellationToken cancellationToken = default);
     Task AddAsync(Collection collection, CancellationToken cancellationToken = default);
     Task UpdateAsync(Collection collection, CancellationToken cancellationToken = default);
     Task DeleteAsync(int id, CancellationToken cancellationToken = default);
@@ -23,6 +24,15 @@ public class CollectionRepository : ICollectionRepository
         return await _context.Collections
             .Include(c => c.Items)
             .FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
+    }
+
+    // Single query: Include eager-loads Items in one round trip (was N+1).
+    public async Task<IReadOnlyList<Collection>> GetAllAsync(CancellationToken cancellationToken = default)
+    {
+        return await _context.Collections
+            .AsNoTracking()
+            .Include(c => c.Items)
+            .ToListAsync(cancellationToken);
     }
 
     public async Task AddAsync(Collection collection, CancellationToken cancellationToken = default)
