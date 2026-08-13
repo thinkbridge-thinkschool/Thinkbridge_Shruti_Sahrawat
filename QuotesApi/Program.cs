@@ -2,6 +2,7 @@
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using OpenTelemetry.Exporter;
+using Azure.Monitor.OpenTelemetry.AspNetCore;
 using QuotesApi.Services;
 using QuotesApi.Repositories;
 using Microsoft.EntityFrameworkCore;
@@ -17,7 +18,17 @@ builder.Host.UseSerilog((context, services, configuration) => configuration
     .WriteTo.Console(outputTemplate:
         "[{Timestamp:HH:mm:ss} {Level:u3}] {SourceContext}{NewLine}      TraceId={TraceId} {Message:lj}{NewLine}{Exception}"));
 
-builder.Services.AddOpenTelemetry()
+var appInsightsConnectionString =
+    builder.Configuration["ApplicationInsights:ConnectionString"];
+
+var otel = builder.Services.AddOpenTelemetry();
+
+if (!string.IsNullOrWhiteSpace(appInsightsConnectionString))
+{
+    otel.UseAzureMonitor(o => o.ConnectionString = appInsightsConnectionString);
+}
+
+otel
     .ConfigureResource(r => r.AddService(
         serviceName: "QuotesApi",
         serviceVersion: "1.0.0"))
