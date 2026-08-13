@@ -23,6 +23,8 @@ jobs:
           dotnet test "$TEST_PROJECT" --no-build
           --logger "trx;LogFileName=test-results.trx"
           --collect:"XPlat Code Coverage"
+          -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Include="[OrderRefactor]*"
+          DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude="[*.Tests]*,[*.Migrations]*"
       - name: Upload test results and coverage
         if: always()
         uses: actions/upload-artifact@v4
@@ -66,6 +68,8 @@ jobs:
           dotnet test "$TEST_PROJECT" --no-build
           --logger "trx;LogFileName=test-results.trx"
           --collect:"XPlat Code Coverage"
+          -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Include="[QuotesApi]*"
+          DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude="[*.Tests]*,[*.Migrations]*"
       - name: Upload test results and coverage
         if: always()
         uses: actions/upload-artifact@v4
@@ -103,14 +107,14 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      # GitHub-hosted ubuntu runners have Docker preinstalled, which Testcontainers needs.
-      # First run pulls mcr.microsoft.com/mssql/server:2022-latest (~5 min).
       - run: dotnet restore "$TEST_PROJECT"
       - run: dotnet build "$TEST_PROJECT" --no-restore
       - run: >
           dotnet test "$TEST_PROJECT" --no-build
           --logger "trx;LogFileName=test-results.trx"
           --collect:"XPlat Code Coverage"
+          -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Include="[QuotesApi]*"
+          DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude="[*.Tests]*,[*.Migrations]*"
       - name: Upload test results and coverage
         if: always()
         uses: actions/upload-artifact@v4
