@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TEST_PROJECT: OrderRefactor.Tests/OrderRefactor.Tests.csproj
-      COVERAGE_THRESHOLD: "20"
+      COVERAGE_THRESHOLD: "70"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -54,7 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TEST_PROJECT: Quotes.Tests.Unit/Quotes.Tests.Unit.csproj
-      COVERAGE_THRESHOLD: "10"
+      COVERAGE_THRESHOLD: "70"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -97,7 +97,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TEST_PROJECT: Quotes.Tests.Integration/Quotes.Tests.Integration.csproj
-      COVERAGE_THRESHOLD: "35"
+      COVERAGE_THRESHOLD: "70"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
