@@ -1,4 +1,5 @@
-using System.IdentityModel.Tokens.Jwt;
+﻿using System.IdentityModel.Tokens.Jwt;
+using OrderRefactor.Configuration;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -12,7 +13,16 @@ builder.Services.AddControllers();
 builder.Services.AddInfrastructure(builder.Configuration);
 
 // Configure JWT Authentication
-var jwtKey = builder.Configuration["Jwt:Key"] ?? throw new InvalidOperationException("Jwt:Key is missing");
+builder.Services.AddOptions<JwtOptions>()
+    .Bind(builder.Configuration.GetSection(JwtOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
+var jwtOptions = builder.Configuration
+    .GetSection(JwtOptions.SectionName).Get<JwtOptions>()
+    ?? throw new InvalidOperationException("Jwt configuration section is missing");
+
+var jwtKey = jwtOptions.Key;
 var keyBytes = Encoding.UTF8.GetBytes(jwtKey);
 
 // Define scheme names
@@ -35,8 +45,8 @@ builder.Services.AddAuthentication(PolicySchemeName)
             ValidateAudience = true,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            ValidIssuer = builder.Configuration["Jwt:Issuer"],
-            ValidAudience = builder.Configuration["Jwt:Audience"],
+            ValidIssuer = jwtOptions.Issuer,
+            ValidAudience = jwtOptions.Audience,
             IssuerSigningKey = new SymmetricSecurityKey(keyBytes)
         };
     })

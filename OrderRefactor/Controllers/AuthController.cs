@@ -1,10 +1,12 @@
-using System.IdentityModel.Tokens.Jwt;
+﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.Extensions.Options;
+using OrderRefactor.Configuration;
 using OrderRefactor.Data;
 using OrderRefactor.Models;
 
@@ -14,12 +16,12 @@ namespace OrderRefactor.Controllers;
 [ApiController]
 public class AuthController : ControllerBase
 {
-    private readonly IConfiguration _configuration;
+    private readonly JwtOptions _jwtOptions;
     private readonly OrdersDbContext _context;
 
-    public AuthController(IConfiguration configuration, OrdersDbContext context)
+    public AuthController(IOptions<JwtOptions> jwtOptions, OrdersDbContext context)
     {
-        _configuration = configuration;
+        _jwtOptions = jwtOptions.Value;
         _context = context;
     }
 
@@ -50,7 +52,7 @@ public class AuthController : ControllerBase
         {
             access_token = accessToken,
             refresh_token = refreshTokenValue,
-            expires_in = 900
+            expires_in = (int)_jwtOptions.AccessTokenLifetime.TotalSeconds
         });
     }
 
@@ -119,7 +121,7 @@ public class AuthController : ControllerBase
         {
             access_token = newAccessToken,
             refresh_token = newRefreshTokenValue,
-            expires_in = 900
+            expires_in = (int)_jwtOptions.AccessTokenLifetime.TotalSeconds
         });
     }
 
@@ -147,14 +149,14 @@ public class AuthController : ControllerBase
     private string GenerateJwtToken(string email)
     {
         var tokenHandler = new JwtSecurityTokenHandler();
-        var key = Encoding.UTF8.GetBytes(_configuration["Jwt:Key"] ?? "super_secret_key_with_at_least_256_bits_length_required");
+        var key = Encoding.UTF8.GetBytes(_jwtOptions.Key);
         
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(new[] { new Claim(ClaimTypes.Name, email) }),
-            Expires = DateTime.UtcNow.AddMinutes(15),
-            Issuer = _configuration["Jwt:Issuer"] ?? "YourIssuer",
-            Audience = _configuration["Jwt:Audience"] ?? "YourAudience",
+            Expires = DateTime.UtcNow.Add(_jwtOptions.AccessTokenLifetime),
+            Issuer = _jwtOptions.Issuer,
+            Audience = _jwtOptions.Audience,
             SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
         };
 
