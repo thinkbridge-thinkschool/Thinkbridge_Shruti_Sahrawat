@@ -19,7 +19,8 @@ builder.Host.UseSerilog((context, services, configuration) => configuration
         "[{Timestamp:HH:mm:ss} {Level:u3}] {SourceContext}{NewLine}      TraceId={TraceId} {Message:lj}{NewLine}{Exception}"));
 
 var appInsightsConnectionString =
-    builder.Configuration["ApplicationInsights:ConnectionString"];
+    builder.Configuration["ApplicationInsights:ConnectionString"]
+    ?? builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"];
 
 var otel = builder.Services.AddOpenTelemetry();
 
