@@ -15,3 +15,8 @@ QuotesApi/quote*.json
 .azure
 
 body.json
+
+bad.json
+coll.json
+smoke.json
+body.json
