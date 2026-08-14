@@ -43,6 +43,7 @@ otel
             o.Protocol = OtlpExportProtocol.Grpc;
         }));
 
+builder.Services.AddHealthChecks();
 builder.Services.AddControllers();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddEndpointsApiExplorer();
@@ -61,6 +62,7 @@ using (var scope = app.Services.CreateScope())
     db.Database.Migrate();
 }
 
+app.MapHealthChecks("/health");
 app.MapQuoteEndpoints();
 app.MapControllers();
 
