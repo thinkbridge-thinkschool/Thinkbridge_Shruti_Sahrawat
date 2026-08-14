@@ -13,3 +13,5 @@ QuotesApi/body.json
 QuotesApi/coll.json
 QuotesApi/quote*.json
 .azure
+
+body.json
