@@ -3,3 +3,12 @@ obj/
 *.db
 
 TestResults/
+
+# SQLite temp files
+*.db-shm
+*.db-wal
+
+# curl test payloads
+QuotesApi/body.json
+QuotesApi/coll.json
+QuotesApi/quote*.json
