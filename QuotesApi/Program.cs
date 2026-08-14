@@ -1,4 +1,7 @@
 ﻿using Serilog;
+using Microsoft.Extensions.Http.Resilience;
+using Polly;
+using Polly.Retry;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using OpenTelemetry.Exporter;
@@ -44,6 +47,52 @@ otel
             o.Protocol = OtlpExportProtocol.Grpc;
         }));
 
+// Named HttpClient with Polly-backed resilience (retry, circuit breaker, timeout).
+builder.Services.AddHttpClient("my-service", client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(30);
+    })
+    .AddResilienceHandler("default", b =>
+    {
+        b.AddRetry(new HttpRetryStrategyOptions
+        {
+            MaxRetryAttempts = 3,
+            BackoffType = DelayBackoffType.Exponential,
+            UseJitter = true,
+            Delay = TimeSpan.FromMilliseconds(200),
+            OnRetry = args =>
+            {
+                Log.Warning(
+                    "Retry {Attempt} after {Delay}ms due to {Outcome}",
+                    args.AttemptNumber + 1,
+                    args.RetryDelay.TotalMilliseconds,
+                    args.Outcome.Exception?.Message
+                        ?? args.Outcome.Result?.StatusCode.ToString());
+                return ValueTask.CompletedTask;
+            }
+        });
+
+        b.AddCircuitBreaker(new HttpCircuitBreakerStrategyOptions
+        {
+            FailureRatio = 0.5,
+            SamplingDuration = TimeSpan.FromSeconds(30),
+            MinimumThroughput = 4,
+            BreakDuration = TimeSpan.FromSeconds(15),
+            OnOpened = args =>
+            {
+                Log.Error("Circuit breaker opened for {Duration}s", args.BreakDuration.TotalSeconds);
+                return ValueTask.CompletedTask;
+            },
+            OnClosed = args =>
+            {
+                Log.Information("Circuit breaker closed");
+                return ValueTask.CompletedTask;
+            }
+        });
+
+        b.AddTimeout(TimeSpan.FromSeconds(10));
+    });
+
 builder.Services.AddHealthChecks();
 builder.Services.AddControllers();
 builder.Services.AddInfrastructure(builder.Configuration);
@@ -64,6 +113,26 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.MapHealthChecks("/health");
+
+// Demo endpoint: forces transient failures so the Polly retry logs are visible.
+app.MapGet("/api/demo/resilience", async (IHttpClientFactory factory, CancellationToken ct) =>
+{
+    var client = factory.CreateClient("my-service");
+    try
+    {
+        var response = await client.GetAsync("http://localhost:9/always-fails", ct);
+        return Results.Ok(new { status = (int)response.StatusCode });
+    }
+    catch (Exception ex)
+    {
+        // Never silently swallowed: the failure is logged and surfaced as 503.
+        Log.Error(ex, "Call to my-service failed after all retries");
+        return Results.Problem(
+            detail: ex.GetType().Name + ": " + ex.Message,
+            statusCode: 503,
+            title: "Downstream call failed after retries");
+    }
+});
 app.MapQuoteEndpoints();
 app.MapControllers();
 
