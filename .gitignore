@@ -20,3 +20,9 @@ bad.json
 coll.json
 smoke.json
 body.json
+
+bad-order.json
+bad-quote.json
+order.json
+quote.json
+quote3.json

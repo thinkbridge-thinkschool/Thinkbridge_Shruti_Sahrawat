@@ -1,0 +1,16 @@
+﻿INSERT INTO Quotes (Author, Text, CreatedAt, IsDeleted) VALUES
+  ('Edsger Dijkstra','Simplicity is prerequisite for reliability.','2026-01-05 09:00:00',0),
+  ('Edsger Dijkstra','Testing shows the presence, not the absence of bugs.','2026-03-11 09:00:00',0),
+  ('Edsger Dijkstra','The question of whether machines can think is about as relevant as whether submarines can swim.','2026-06-02 09:00:00',0),
+  ('Barbara Liskov','Modularity based on abstraction is the way things get done.','2026-02-14 09:00:00',0),
+  ('Barbara Liskov','I did not set out to be a pioneer.','2026-07-19 09:00:00',0),
+  ('Donald Knuth','Premature optimization is the root of all evil.','2026-01-22 09:00:00',0),
+  ('Donald Knuth','Beware of bugs in the above code; I have only proved it correct, not tried it.','2026-05-30 09:00:00',0),
+  ('Donald Knuth','An algorithm must be seen to be believed.','2026-08-01 09:00:00',0),
+  ('Margaret Hamilton','There was no choice but to be pioneers.','2026-04-08 09:00:00',0),
+  ('Leslie Lamport','A distributed system is one in which the failure of a computer you did not know existed can render your own computer unusable.','2026-06-25 09:00:00',0),
+  ('Leslie Lamport','If you are thinking without writing, you only think you are thinking.','2026-07-30 09:00:00',0),
+  ('Tony Hoare','I call it my billion-dollar mistake: the invention of the null reference.','2026-03-03 09:00:00',0),
+  ('Tony Hoare','There are two ways of constructing a software design.','2026-08-10 09:00:00',0),
+  ('Ada Lovelace','The Analytical Engine weaves algebraic patterns.','2026-02-28 09:00:00',0),
+  ('Ada Lovelace','That brain of mine is something more than merely mortal.','2026-05-15 09:00:00',0);
