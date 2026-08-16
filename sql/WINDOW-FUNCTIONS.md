@@ -79,6 +79,31 @@ Grace Hopper  2026-08-13 11:44:54.0655007  0.0           3.0
 ```
 
 The window function is doing its job correctly in both cases. The unit choice is what makes the result readable or misleading, and "0.0 days" reads as "no time passed" when four minutes did. On a dataset where authors post several times an hour, a days column would report every gap as zero while looking entirely plausible.
+## RANK versus ROW_NUMBER, and a running total
+
+The exercise asked for a running count and a LAG gap, which the query above covers. The lesson also introduces `RANK` and `SUM() OVER`, and `RANK` is worth demonstrating here because it addresses a weakness in the query above rather than merely adding a column.
+
+`ROW_NUMBER` always produces distinct values, so when two rows tie on the ordering column it picks one arbitrarily. `RANK` gives tied rows the same number. Ranking by `date(CreatedAt)` instead of the full timestamp creates ties deliberately — ranking by the full timestamp would never tie, and the contrast would be invisible.
+
+```
+Author        CreatedAt                    quote_number  rank_by_day  days_since_previous  running_total
+Donald Knuth  2026-01-22 09:00:00          1             1            NULL                 1
+Donald Knuth  2026-05-30 09:00:00          2             2            128.0                2
+Donald Knuth  2026-08-01 09:00:00          3             3            63.0                 3
+Grace Hopper  2026-08-13 11:32:57.9568063  1             1            NULL                 1
+Grace Hopper  2026-08-13 11:37:07.415714   2             1            0.0                  2
+Grace Hopper  2026-08-13 11:39:27.4084536  3             1            0.0                  3
+Grace Hopper  2026-08-13 11:41:51.629081   4             1            0.0                  4
+Grace Hopper  2026-08-13 11:44:54.0655007  5             1            0.0                  5
+```
+
+Knuth's three quotes fall on distinct days, so the two columns agree: 1, 2, 3. Grace Hopper's five fall on the same day, so `ROW_NUMBER` counts 1 through 5 while `RANK` reports 1 for all of them.
+
+That is the whole distinction, and it decides which function is correct for a given question. "Which quote was this, in order?" wants `ROW_NUMBER`. "Which day-rank does this quote belong to?" wants `RANK`, because tied rows genuinely share a position and inventing an order between them would be a lie. The arbitrary tie-breaking noted as a caveat above is precisely what `RANK` declines to do.
+
+`SUM(1) OVER w` gives the cumulative count and tracks `ROW_NUMBER` exactly here, since every row contributes 1. It diverges as soon as the summed expression is anything other than a constant — `SUM(LENGTH(Text)) OVER w`, for instance, would give a running character total.
+
+`LEAD` is deliberately omitted. Days-until-next is the mirror image of days-since-previous and would demonstrate nothing the `LAG` column does not already show.
 
 ## Running it
 
