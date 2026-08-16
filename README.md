@@ -1,6 +1,6 @@
 # Thinkbridge Backend Assignment — Shruti Sahrawat
 
-Days 1–5. All code in this repository. **141 tests passing** across three test projects. CI is currently red on a coverage gate, not on test failures — see [CI status](#running-it).
+Days 1–7. All code in this repository. **141 tests passing** across three test projects. CI is currently red on a coverage gate, not on test failures — see [CI status](#running-it).
 
 | Suite | Tests | Runtime |
 |---|---|---|
@@ -203,3 +203,31 @@ curl http://localhost:8080/health   # Healthy
 ```
 
 **CI status.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs all three projects as separate jobs on GitHub Actions. All three `dotnet test` steps pass, including the integration job, which starts a real SQL Server 2022 container on the runner via Testcontainers. All three jobs then fail on a final *Enforce line coverage threshold* step: the gate is set to 70% and actual line coverage is 40%. The gate was introduced in `5cd551d` and this codebase has never met it. Raising coverage honestly means testing `CollectionRepository`, the endpoint handlers, and `ExceptionHandlingMiddleware` — not padding the number against `Original/OrderController.cs`, which exists in order to be bad. I would rather agree a threshold that reflects reality and ratchet it upward than write tests that move a percentage without adding confidence. [Latest run](../../actions).
+
+---
+
+## Day 7 — Joins and CTEs at depth
+
+**Author quote counts with most-recent quote, in one statement**
+[`sql/author-summary.sql`](sql/author-summary.sql) · [full notes and query plans](sql/README.md)
+
+```sql
+WITH ranked AS (
+    SELECT Author, Text, CreatedAt,
+           ROW_NUMBER() OVER (PARTITION BY Author ORDER BY CreatedAt DESC) AS rn,
+           COUNT(*)     OVER (PARTITION BY Author)                         AS quote_count
+    FROM Quotes
+    WHERE IsDeleted = 0
+)
+SELECT Author, quote_count, Text AS most_recent_quote, CreatedAt AS most_recent_at
+FROM ranked
+WHERE rn = 1
+ORDER BY quote_count DESC, Author
+LIMIT 10;
+```
+
+The two required values pull in opposite directions: the count is an aggregate that collapses rows, while the most-recent quote is a column from one specific row that needs those rows kept. Window functions compute over a partition without collapsing it, so `ROW_NUMBER` picks the newest row per author and `COUNT(*) OVER` produces the count in the same pass.
+
+**Why a CTE rather than a correlated subquery.** `EXPLAIN QUERY PLAN` shows the correlated version carrying a `CORRELATED SCALAR SUBQUERY` node with its own `SCAN q2` — the inner query depends on the outer row, so it re-scans and re-sorts once per author group. The CTE version has no `CORRELATED` node; it is nested co-routines pipelining from a single `SCAN Quotes`. Trade-off worth naming: the CTE version uses three `USE TEMP B-TREE` sorts against the correlated version's two, so it front-loads more sorting. On 23 rows neither is measurably slow — the CTE wins on how it scales, not on this dataset.
+
+Same shape as the Day 5 N+1: one query per collection turned a request into six sequential round trips. A correlated subquery is that pattern moved inside the database engine.
