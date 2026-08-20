@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8' />
+<title>TrackingBenchmarks-20260820-101830</title>
+
+<style type="text/css">
+	table { border-collapse: collapse; display: block; width: 100%; overflow: auto; }
+	td, th { padding: 6px 13px; border: 1px solid #ddd; text-align: right; }
+	tr { background-color: #fff; border-top: 1px solid #ccc; }
+	tr:nth-child(even) { background: #f8f8f8; }
+</style>
+</head>
+<body>
+<pre><code>
+BenchmarkDotNet v0.15.8, Windows 11 (10.0.26200.9168/25H2/2025Update/HudsonValley2)
+12th Gen Intel Core i5-1235U 1.30GHz, 1 CPU, 12 logical and 10 physical cores
+.NET SDK 10.0.302
+  [Host]     : .NET 10.0.10 (10.0.10, 10.0.1026.32716), X64 RyuJIT x86-64-v3
+  Job-AGBPQC : .NET 10.0.10 (10.0.10, 10.0.1026.32716), X64 RyuJIT x86-64-v3
+</code></pre>
+<pre><code>IterationCount=15  WarmupCount=3  
+</code></pre>
+
+<table>
+<thead><tr><th>Method</th><th>Rows</th><th>Mean </th><th>Error</th><th>StdDev</th><th>Ratio</th><th>RatioSD</th><th>Gen0</th><th>Gen1</th><th>Gen2</th><th>Allocated</th><th>Alloc Ratio</th>
+</tr>
+</thead><tbody><tr><td>Tracked</td><td>100</td><td>677.8 &mu;s</td><td>199.12 &mu;s</td><td>186.25 &mu;s</td><td>1.09</td><td>0.45</td><td>27.3438</td><td>3.9063</td><td>-</td><td>176.6 KB</td><td>1.00</td>
+</tr><tr><td>AsNoTracking</td><td>100</td><td>374.4 &mu;s</td><td>73.61 &mu;s</td><td>65.26 &mu;s</td><td>0.60</td><td>0.21</td><td>19.5313</td><td>1.9531</td><td>-</td><td>120.79 KB</td><td>0.68</td>
+</tr><tr><td>Tracked</td><td>1000</td><td>2,885.9 &mu;s</td><td>233.05 &mu;s</td><td>206.59 &mu;s</td><td>1.00</td><td>0.10</td><td>195.3125</td><td>113.2813</td><td>-</td><td>1205.23 KB</td><td>1.00</td>
+</tr><tr><td>AsNoTracking</td><td>1000</td><td>1,971.1 &mu;s</td><td>216.49 &mu;s</td><td>202.51 &mu;s</td><td>0.69</td><td>0.08</td><td>101.5625</td><td>35.1563</td><td>-</td><td>638.91 KB</td><td>0.53</td>
+</tr><tr><td>Tracked</td><td>10000</td><td>45,891.8 &mu;s</td><td>4,370.29 &mu;s</td><td>4,087.97 &mu;s</td><td>1.01</td><td>0.12</td><td>1750.0000</td><td>1000.0000</td><td>250.0000</td><td>11427.25 KB</td><td>1.00</td>
+</tr><tr><td>AsNoTracking</td><td>10000</td><td>24,952.9 &mu;s</td><td>2,311.75 &mu;s</td><td>2,162.41 &mu;s</td><td>0.55</td><td>0.07</td><td>1000.0000</td><td>666.6667</td><td>266.6667</td><td>5916.85 KB</td><td>0.52</td>
+</tr></tbody></table>
+</body>
+</html>

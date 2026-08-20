@@ -26,3 +26,6 @@ bad-quote.json
 order.json
 quote.json
 quote3.json
+
+# BenchmarkDotNet run logs (keep the results reports)
+Quotes.Benchmark/BenchmarkDotNet.Artifacts/*.log
