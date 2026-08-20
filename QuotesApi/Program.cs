@@ -95,7 +95,7 @@ builder.Services.AddHttpClient("my-service", client =>
 
 builder.Services.AddHealthChecks();
 builder.Services.AddControllers();
-builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddInfrastructure(builder.Configuration, builder.Environment.IsDevelopment());
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddScoped<ICollectionRepository, CollectionRepository>();
 builder.Services.AddSingleton<IClock, SystemClock>();

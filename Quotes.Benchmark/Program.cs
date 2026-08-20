@@ -76,6 +76,12 @@ public static class Program
             return;
         }
 
+        if (args.Contains("--projections"))
+        {
+            Quotes.Benchmark.Projections.Run();
+            return;
+        }
+
         BenchmarkRunner.Run<TrackingBenchmarks>();
     }
 }
