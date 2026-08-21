@@ -125,7 +125,7 @@ A typed options class with data annotations, bound with `ValidateDataAnnotations
 
 **Diagnose a slow endpoint from traces**
 [before](QuotesApi/docs/day5-before-n1.png) · [after](QuotesApi/docs/day5-after-fixed.png) · [`CollectionRepository.cs`](QuotesApi/Repositories/CollectionRepository.cs)
-A deliberate N+1 in the collections list endpoint: the repository queried each collection separately instead of eager-loading. Jaeger showed it as **seven spans in a sequential staircase at 4.45s**. Replacing the loop with a single `Include` query gave **two spans at 895ms** — 5x faster overall, 14x less database time. The useful detail was that the child DB spans summed to only 1.05s of the 4.45s, so most of the cost was per-round-trip overhead paid six times rather than slow SQL. Commit `6c1d36b`.
+A deliberate N+1 in the collections list endpoint: the repository queried each collection separately instead of eager-loading. Jaeger showed it as **seven spans in a sequential staircase at 4.45s**. Replacing the loop with a single `Include` query gave **two spans at 895ms** — 5x faster overall, 14x less database time. The useful detail was that the child DB spans summed to only 1.05s of the 4.45s, so most of the request time was not query execution. The trace also showed the six spans running strictly sequentially with no overlap, so the cost was in doing six separate operations one after another rather than in any of them being slow. Commit `6c1d36b`.
 
 **Container image from `dotnet publish`**
 [`QuotesApi/QuotesApi.csproj`](QuotesApi/QuotesApi.csproj)
