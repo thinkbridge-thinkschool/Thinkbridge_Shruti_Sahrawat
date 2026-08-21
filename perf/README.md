@@ -42,7 +42,7 @@ foreach (var author in authors)
 | Slow + index on Author | 51.86 s | 52.79 s | 52.84 s | 5 | 0.056 req/s |
 | **Fixed** | **220.78 ms** | **303.66 ms** | **385.06 ms** | **1,308** | **21.77 req/s** |
 
-A single uncontended request took **14.32 s**. Under 5 concurrent users it took **67 s** — not five requests running in parallel at 14 s each, but five requests queueing behind one another. 5 × 14 ≈ 70, which is what the number is.
+A single uncontended request took **14.32 s**. Under 5 concurrent users it took **67 s**, and 5 × 14 ≈ 70. With this setup the concurrent requests showed strong contention, so the 5-VU result is dominated by queueing rather than representing five independent 14-second executions. I did not instrument where the contention occurs, so this describes the observation rather than claiming a mechanism.
 
 **The percentile shape is itself a diagnostic.** On the baseline, p50, p95 and p99 are identical to three significant figures. Percentiles collapsing onto a single value means every request had the same experience, which is what saturation looks like — nobody got served quickly because everybody was in the same queue. The fixed endpoint shows a real distribution: 220 ms median, 385 ms at p99, 562 ms max. Spread is healthy; a flat line is not.
 
@@ -58,7 +58,7 @@ WHERE "q"."Author" = @author AND NOT ("q"."IsDeleted")
 
 Two things wrong with it beyond the count. It selects every column including `Text` (up to 1000 characters) when only `CreatedAt` is used, and it filters on `Author`, which had no index.
 
-Each execution logged 5–7 ms. 251 × 6 ms ≈ 1.5 s of pure database time, and the request took 14 s — so most of the wall clock is per-round-trip overhead rather than query execution.
+Each execution logged 5–7 ms. 251 × 6 ms ≈ 1.5 s of logged database time against a 14 s request, so roughly 90% of the wall clock is not accounted for by query execution. I did not profile what the remainder consists of — plausible contributors are EF materialising and change-tracking the entities the loop pulls back across all iterations, per-query command setup, and the LINQ `Max` over each returned list. Naming a single cause without measuring it would be a guess.
 
 ## The execution plan
 
@@ -123,16 +123,18 @@ LIMIT @p
 
 One statement, aggregated in the database, projected to three columns rather than five, and `LIMIT` applied server-side.
 
+A note on writing it: EF could not translate a record constructor inside the `Select` over a `GroupBy` — it threw `InvalidOperationException: The LINQ expression could not be translated`. Projecting to an anonymous type and building the DTO after materialisation works. That is EF Core 3.0+ refusing to silently fall back to client evaluation, which is the behaviour the previous exercise was about.
+
 ### 2. The missing index on `Author`
 
 Every one of the 250 inner queries scanned the whole table. `CREATE INDEX IX_Quotes_Author ON Quotes(Author)` turns each of them into a seek.
 
 **But this is the smaller problem, and that is the useful finding.** Adding the index alone moved the single request from 14.32 s to 11.68 s — an 18% improvement — and p50 under load from 67 s to 51.9 s. Real, and nowhere near enough. The endpoint was still 235× slower than the fixed version.
 
-The two problems are independent. The index makes each query faster; it does not make 251 queries stop being 251 queries. Most of the remaining time is per-round-trip overhead, which no index can address. Someone who adds an index, sees a 20% improvement and stops has fixed the smaller half.
+The two problems are independent. The index makes each query faster; it does not make 251 queries stop being 251 queries. Someone who adds an index, sees a 20% improvement and stops has fixed the smaller half.
 
 ## A note on the measurement
 
-Five virtual users is a deliberately low number. The slow endpoint takes ~14 s per request against SQLite, which serialises access, so higher concurrency would measure queue depth rather than the endpoint. The baseline run completed only 5 requests in 60 seconds; the index run completed 5 and left 5 more interrupted at the cutoff. Those are small samples, but the effect size is large enough that precision is not the constraint.
+Five virtual users is a deliberately low number. The slow endpoint takes ~14 s per request, so higher concurrency would mostly measure queue depth. The baseline run completed only 5 requests in 60 seconds; the index run completed 5 and left 5 more interrupted at the cutoff. Those are small samples, and the slow-path percentiles should be read as indicative rather than precise — though the effect size is large enough that precision is not the constraint.
 
-Running against SQLite also means these absolute numbers are specific to an embedded, single-writer database on a laptop. Against a networked SQL Server the per-round-trip cost would be higher, not lower, so the N+1 penalty would be worse rather than better.
+Running against SQLite also means these absolute numbers are specific to an embedded database on a laptop, with no network between the application and the data. Against a networked SQL Server each of the 251 queries would additionally pay network latency, so the N+1 penalty would very likely be worse — though that is reasoning from the shape of the problem rather than something measured here.
