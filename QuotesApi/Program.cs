@@ -134,6 +134,7 @@ app.MapGet("/api/demo/resilience", async (IHttpClientFactory factory, Cancellati
     }
 });
 app.MapQuoteEndpoints();
+app.MapProfilingEndpoints();
 app.MapControllers();
 
 app.Run();
