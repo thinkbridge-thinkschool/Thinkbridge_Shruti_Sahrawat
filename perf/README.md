@@ -131,7 +131,7 @@ Every one of the 250 inner queries scanned the whole table. `CREATE INDEX IX_Quo
 
 **But this is the smaller problem, and that is the useful finding.** Adding the index alone moved the single request from 14.32 s to 11.68 s — an 18% improvement — and p50 under load from 67 s to 51.9 s. Real, and nowhere near enough. The endpoint was still 235× slower than the fixed version.
 
-The two problems are independent. The index makes each query faster; it does not make 251 queries stop being 251 queries. Someone who adds an index, sees a 20% improvement and stops has fixed the smaller half.
+The two problems are independent. The index makes each query faster; it does not make 251 queries stop being 251 queries. Whatever dominates the remaining 11.7 s, it is not scan time — the index removed that and the endpoint barely moved — so no further indexing would help either. Someone who adds an index, sees a 20% improvement and stops has fixed the smaller half.
 
 ## A note on the measurement
 
