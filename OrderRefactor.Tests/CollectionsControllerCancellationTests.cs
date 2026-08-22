@@ -3,6 +3,7 @@ extern alias QuotesApiProject;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using MediatR;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 using QuotesApiProject::QuotesApi.Controllers;
@@ -24,7 +25,9 @@ public class CollectionsControllerCancellationTests
                 return Task.FromResult<QuotesApiProject::QuotesApi.Domain.Collection?>(null);
             });
 
-        var controller = new CollectionsController(mockRepo.Object);
+        var mockMediator = new Mock<IMediator>();
+
+        var controller = new CollectionsController(mockMediator.Object, mockRepo.Object);
         
         using var cts = new CancellationTokenSource();
         cts.Cancel();
