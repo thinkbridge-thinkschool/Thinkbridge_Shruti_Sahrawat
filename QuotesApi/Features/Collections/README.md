@@ -89,14 +89,17 @@ public sealed class GetCollectionSummariesHandler(QuotesDbContext db)
             .Select(c => new
             {
                 c.Id, c.Name, c.OwnerId,
-                Items = c.Items
+                ItemCount = c.Items.Count,
+                MostRecentlyAdded = c.Items.Count == 0 ? (DateTime?)null : c.Items.Max(i => i.AddedAt),
+                PreviewItems = c.Items
                     .OrderByDescending(i => i.AddedAt)
+                    .Take(request.PreviewSize)
                     .Select(i => new { i.QuoteId, i.AddedAt })
                     .ToList()
             })
             .ToListAsync(ct);
 
-        var quoteIds = collections.SelectMany(c => c.Items.Select(i => i.QuoteId))
+        var quoteIds = collections.SelectMany(c => c.PreviewItems.Select(i => i.QuoteId))
                                   .Distinct().ToList();
 
         var quotes = await db.Quotes
@@ -127,10 +130,26 @@ Author and text inline, `itemCount` and `mostRecentlyAdded` precomputed. One cal
 Two queries for any number of collections:
 
 ```sql
-SELECT "c"."Id", "c"."Name", "c"."OwnerId", "c0"."QuoteId", "c0"."AddedAt", "c0"."Id"
+SELECT "c"."Id", "c"."Name", "c"."OwnerId", (
+    SELECT COUNT(*) FROM "CollectionItem" AS "c0"
+    WHERE "c"."Id" = "c0"."CollectionId"), CASE
+    WHEN (SELECT COUNT(*) FROM "CollectionItem" AS "c1"
+          WHERE "c"."Id" = "c1"."CollectionId") = 0 THEN NULL
+    ELSE (SELECT MAX("c2"."AddedAt") FROM "CollectionItem" AS "c2"
+          WHERE "c"."Id" = "c2"."CollectionId")
+END, "c5"."QuoteId", "c5"."AddedAt", "c5"."Id"
 FROM "Collections" AS "c"
-LEFT JOIN "CollectionItem" AS "c0" ON "c"."Id" = "c0"."CollectionId"
-ORDER BY "c"."Id", "c0"."AddedAt" DESC
+LEFT JOIN (
+    SELECT "c4"."QuoteId", "c4"."AddedAt", "c4"."Id", "c4"."CollectionId"
+    FROM (
+        SELECT "c3"."QuoteId", "c3"."AddedAt", "c3"."Id", "c3"."CollectionId",
+               ROW_NUMBER() OVER(PARTITION BY "c3"."CollectionId" ORDER BY "c3"."AddedAt" DESC) AS "row"
+        FROM "CollectionItem" AS "c3"
+    ) AS "c4"
+    WHERE "c4"."row" <= @request_PreviewSize
+) AS "c5" ON "c"."Id" = "c5"."CollectionId"
+WHERE "c"."OwnerId" = @request_OwnerId
+ORDER BY "c"."Id", "c5"."CollectionId", "c5"."AddedAt" DESC
 ```
 
 ```sql
@@ -139,7 +158,7 @@ FROM "Quotes" AS "q"
 WHERE "q"."Id" IN (3, 2, 1)
 ```
 
-The nested `Items` projection became a single `LEFT JOIN` rather than a query per collection, and the quotes are fetched in one `IN` regardless of how many collections reference them. That is the N+1 lesson from Day 5 and Day 11 applied on purpose rather than found under a profiler.
+The preview projection became a `LEFT JOIN` over a `ROW_NUMBER()` window rather than a query per collection, and `PreviewSize` is applied *inside* that window — the database returns at most N items per collection instead of returning all of them and trimming in memory afterwards. The `COUNT` and `MAX` subqueries carry no row filter, so `itemCount` and `mostRecentlyAdded` still reflect the whole collection, not just the preview. Quotes are then fetched in one `IN`, and only for items that actually appear in a preview. That is the N+1 lesson from Day 5 and Day 11 applied on purpose rather than found under a profiler.
 
 Both queries select only the columns the read model exposes — `Text` is fetched because the preview displays it, `IsDeleted` is not fetched at all.
 
