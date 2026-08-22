@@ -33,6 +33,20 @@ public class CollectionsController : ControllerBase
         return Ok(summaries);
     }
 
+    // Dapper counterpart of the endpoint above, for a side-by-side comparison.
+    // Same query contract, same response shape - see DAPPER.md.
+    [HttpGet("summaries-dapper")]
+    public async Task<IActionResult> GetSummariesDapper(
+        [FromQuery] string? ownerId,
+        [FromQuery] int previewSize = 3,
+        CancellationToken cancellationToken = default)
+    {
+        var summaries = await _mediator.Send(
+            new GetCollectionSummariesDapperQuery(ownerId, previewSize), cancellationToken);
+
+        return Ok(summaries);
+    }
+
     // WRITE PATH - goes to the command handler, which goes through the
     // aggregate. Returns the id, not the entity.
     [HttpPost]

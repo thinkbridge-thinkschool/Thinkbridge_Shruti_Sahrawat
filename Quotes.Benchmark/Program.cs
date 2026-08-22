@@ -82,6 +82,12 @@ public static class Program
             return;
         }
 
+        if (args.Contains("--collections"))
+        {
+            BenchmarkRunner.Run<CollectionSummaryBenchmarks>();
+            return;
+        }
+
         BenchmarkRunner.Run<TrackingBenchmarks>();
     }
 }
