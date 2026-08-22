@@ -29,3 +29,7 @@ quote3.json
 
 # BenchmarkDotNet run logs (keep the results reports)
 Quotes.Benchmark/BenchmarkDotNet.Artifacts/*.log
+
+commitmsg.txt
+diff-output.txt
+test-output*.txt
