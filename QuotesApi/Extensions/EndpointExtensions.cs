@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Mvc;
 using QuotesApi.Models;
 using QuotesApi.Repositories;
+using QuotesApi.Services;
 
 namespace QuotesApi.Extensions;
 
@@ -21,7 +22,7 @@ public static class EndpointExtensions
             return Results.Ok(result);
         });
 
-        group.MapPost("/", async (CreateQuoteRequest request, IQuoteRepository repo, CancellationToken ct) =>
+        group.MapPost("/", async (CreateQuoteRequest request, IQuoteRepository repo, IClock clock, CancellationToken ct) =>
         {
             var results = new List<ValidationResult>();
             var validationContext = new ValidationContext(request);
@@ -34,7 +35,7 @@ public static class EndpointExtensions
                 return Results.ValidationProblem(errors);
             }
 
-            var quote = Quote.Create(request.Author, request.Text);
+            var quote = Quote.Create(request.Author, request.Text, clock);
             var created = await repo.AddAsync(quote, ct);
             return Results.Created($"/api/quotes/{created.Id}", QuoteResponse.FromEntity(created));
         });
