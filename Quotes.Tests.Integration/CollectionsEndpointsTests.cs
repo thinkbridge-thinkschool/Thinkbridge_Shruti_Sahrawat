@@ -14,6 +14,7 @@ public class CollectionsEndpointsTests
     // view records mirror only the JSON shape we need to assert against.
     private sealed record CollectionItemView(int QuoteId, DateTime AddedAt);
     private sealed record CollectionView(int Id, string Name, string OwnerId, List<CollectionItemView> Items);
+    private sealed record CreateCollectionView(int Id);
 
     private readonly MsSqlContainerFixture _sqlServer;
 
@@ -28,9 +29,8 @@ public class CollectionsEndpointsTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         response.Headers.Location.Should().NotBeNull();
-        var body = await response.Content.ReadFromJsonAsync<CollectionView>(TestInfrastructure.Json);
-        body!.Name.Should().Be("My Collection");
-        body.OwnerId.Should().Be("owner-1");
+        var body = await response.Content.ReadFromJsonAsync<CreateCollectionView>(TestInfrastructure.Json);
+        body!.Id.Should().BePositive();
     }
 
     [Fact]
@@ -50,12 +50,13 @@ public class CollectionsEndpointsTests
     {
         using var host = await TestInfrastructure.CreateFreshHost(_sqlServer);
         var createResponse = await host.Client.PostAsJsonAsync("/api/collections", new CreateCollectionDto { Name = "My Collection", OwnerId = "owner-1" });
-        var created = await createResponse.Content.ReadFromJsonAsync<CollectionView>(TestInfrastructure.Json);
+        var created = await createResponse.Content.ReadFromJsonAsync<CreateCollectionView>(TestInfrastructure.Json);
 
         var response = await host.Client.PostAsync($"/api/collections/{created!.Id}/items/42", null);
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var updated = await response.Content.ReadFromJsonAsync<CollectionView>(TestInfrastructure.Json);
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        var getResponse = await host.Client.GetAsync($"/api/collections/{created.Id}");
+        var updated = await getResponse.Content.ReadFromJsonAsync<CollectionView>(TestInfrastructure.Json);
         updated!.Items.Should().ContainSingle(i => i.QuoteId == 42);
     }
 
@@ -74,7 +75,7 @@ public class CollectionsEndpointsTests
     {
         using var host = await TestInfrastructure.CreateFreshHost(_sqlServer);
         var createResponse = await host.Client.PostAsJsonAsync("/api/collections", new CreateCollectionDto { Name = "My Collection", OwnerId = "owner-1" });
-        var created = await createResponse.Content.ReadFromJsonAsync<CollectionView>(TestInfrastructure.Json);
+        var created = await createResponse.Content.ReadFromJsonAsync<CreateCollectionView>(TestInfrastructure.Json);
         await host.Client.PostAsync($"/api/collections/{created!.Id}/items/42", null);
 
         var response = await host.Client.PostAsync($"/api/collections/{created.Id}/items/42", null);
@@ -89,7 +90,7 @@ public class CollectionsEndpointsTests
     {
         using var host = await TestInfrastructure.CreateFreshHost(_sqlServer);
         var createResponse = await host.Client.PostAsJsonAsync("/api/collections", new CreateCollectionDto { Name = "My Collection", OwnerId = "owner-1" });
-        var created = await createResponse.Content.ReadFromJsonAsync<CollectionView>(TestInfrastructure.Json);
+        var created = await createResponse.Content.ReadFromJsonAsync<CreateCollectionView>(TestInfrastructure.Json);
         await host.Client.PostAsync($"/api/collections/{created!.Id}/items/42", null);
 
         var response = await host.Client.DeleteAsync($"/api/collections/{created.Id}/items/42");
@@ -114,7 +115,7 @@ public class CollectionsEndpointsTests
     {
         using var host = await TestInfrastructure.CreateFreshHost(_sqlServer);
         var createResponse = await host.Client.PostAsJsonAsync("/api/collections", new CreateCollectionDto { Name = "My Collection", OwnerId = "owner-1" });
-        var created = await createResponse.Content.ReadFromJsonAsync<CollectionView>(TestInfrastructure.Json);
+        var created = await createResponse.Content.ReadFromJsonAsync<CreateCollectionView>(TestInfrastructure.Json);
 
         var response = await host.Client.DeleteAsync($"/api/collections/{created!.Id}/items/999");
 
@@ -128,7 +129,7 @@ public class CollectionsEndpointsTests
     {
         using var host = await TestInfrastructure.CreateFreshHost(_sqlServer);
         var createResponse = await host.Client.PostAsJsonAsync("/api/collections", new CreateCollectionDto { Name = "My Collection", OwnerId = "owner-1" });
-        var created = await createResponse.Content.ReadFromJsonAsync<CollectionView>(TestInfrastructure.Json);
+        var created = await createResponse.Content.ReadFromJsonAsync<CreateCollectionView>(TestInfrastructure.Json);
 
         var response = await host.Client.GetAsync($"/api/collections/{created!.Id}");
 

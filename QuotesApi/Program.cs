@@ -93,6 +93,8 @@ builder.Services.AddHttpClient("my-service", client =>
         b.AddTimeout(TimeSpan.FromSeconds(10));
     });
 
+builder.Services.AddMediatR(cfg =>
+    cfg.RegisterServicesFromAssembly(typeof(Program).Assembly));
 builder.Services.AddHealthChecks();
 builder.Services.AddControllers();
 builder.Services.AddInfrastructure(builder.Configuration, builder.Environment.IsDevelopment());
