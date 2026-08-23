@@ -69,7 +69,7 @@ Proven end-to-end in [`RefreshTokenTests.cs`](OrderRefactor.Tests/RefreshTokenTe
 
 ## Day 3 — Enterprise Auth and Testing
 
-**Wire Entra ID as the identity provider** *(config complete, live token unverified — full account in [`docs/ENTRA-VERIFICATION.md`](OrderRefactor/docs/ENTRA-VERIFICATION.md))*
+**Wire Entra ID as the identity provider** — verified end to end. Full account in [`docs/ENTRA-VERIFICATION.md`](OrderRefactor/docs/ENTRA-VERIFICATION.md).
 [`OrderRefactor/Program.cs`](OrderRefactor/Program.cs) registers two bearer schemes behind a policy scheme:
 Request with Bearer token
 ↓
@@ -81,7 +81,11 @@ iss == "OrderRefactorIssuer"?
 ↓
 [Authorize] resolves as normal — controllers unchanged
 Entra configuration (`TenantId`, `ClientId`, `Audience`) lives in `appsettings.json`; these are public identifiers, not secrets. Authority is `https://login.microsoftonline.com/{tenant}/v2.0`. No client secret is needed anywhere — an API that only validates tokens uses Microsoft's published signing keys.
-**Known gap:** the application is registered in Entra and the code path is in place, but I could not obtain a real Entra access token to verify end-to-end. The institutional tenant rejected the `access_as_user` scope grant (`AADSTS65005`). The internal JWT path is verified working; the Entra branch has never seen a Microsoft-signed token.
+A real Microsoft-signed token now authenticates against this API. `GET /api/orders/whoami` returns 401 with no token, 401 with a malformed one, and 200 with an Entra token whose issuer is `https://login.microsoftonline.com/{tenant}/v2.0` and which the policy scheme routes to `EntraJwt`. Microsoft issued it, the handler fetched the signing keys from the published JWKS endpoint and verified the signature asymmetrically, and audience and lifetime both checked out.
+
+**The honest caveat:** that was proven in a personal Entra directory where I am Global Administrator, not in the institutional thinkbridge tenant, which still rejects the `access_as_user` grant with `AADSTS65005` because granting it needs an admin I am not. I routed around the blocker rather than through it. What is proven is that the code validates Entra tokens correctly; what is not proven is that the thinkbridge registration is configured. The difference between them is three values in `appsettings.json` and no code at all.
+
+Two things nearly broke it silently, both producing a 401 that looks like a signing failure. A default registration issues **v1** tokens whose issuer is `sts.windows.net`, which fails against a v2 `Authority` — and would not even reach the Entra validator, since `IssuerSchemeSelector` matches on the `login.microsoftonline.com` prefix and would fall through to the internal scheme. And with `requestedAccessTokenVersion = 2` the `aud` claim is the bare client-id GUID rather than `api://{client-id}`; the value in config was set by decoding the token rather than by assuming.
 
 What *is* proven is the routing decision, which used to be an untestable lambda inside `Program.cs`: reaching it meant booting the app and letting the Entra handler make a live call to `login.microsoftonline.com` for its key set. It now lives in [`IssuerSchemeSelector`](OrderRefactor/Authentication/IssuerSchemeSelector.cs) with [20 tests](OrderRefactor.Tests/IssuerSchemeSelectorTests.cs) covering every branch in microseconds, no network involved.
 

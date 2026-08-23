@@ -1,93 +1,129 @@
-# Entra ID: what is verified, and what is not
+# Entra ID: what is verified, and in which tenant
 
 Companion to [`DAY3_README.md`](../DAY3_README.md), which covers the architecture.
-This file covers only the honest question: **which parts of it have actually been
-proven to work, and which parts are code I believe in but have not seen run.**
+This file answers the only question that matters about an authentication
+boundary: **what has actually been observed to work, and under what conditions.**
 
-The exercise asks for `curl` output showing an Entra-issued access token
-authenticating against the API. I cannot produce that, and this is the account
-of why rather than a quiet omission.
-
----
-
-## Verified
-
-| Claim | How it was proven |
-|---|---|
-| The internal JWT path validates a self-issued token end to end | `OrderControllerTests` — anonymous 401, wrong policy 403, correct policy 201, expired 401, malformed 401 |
-| Refresh rotation and reuse detection work against a real HTTP pipeline | `RefreshTokenTests` — replay a spent token, whole family dies |
-| The policy scheme routes on the issuer claim | `IssuerSchemeSelectorTests` — 20 cases covering no header, non-Bearer, unreadable token, our issuer, an Entra issuer, an unknown issuer, and a case-insensitive `Bearer` prefix |
-| A token claiming an Entra issuer but signed with the internal key is routed to Entra, not to the internal validator | Same file. This is the attack the router must not fall for: a forged issuer claim must not buy validation under the weaker scheme |
-| Renaming `Jwt:Issuer` does not break routing | Same file. The old inline lambda compared against a hardcoded `"OrderRefactorIssuer"` while the validator it routed to read `ValidIssuer` from configuration — the two would have silently diverged the moment config changed, and every internally-issued token would have been routed to Entra and rejected |
-
-The second row is the part worth stating plainly. The policy scheme reads the
-issuer claim *before* anything has validated the signature, which sounds alarming
-until you see what it is used for: it only chooses **which validator runs**, and
-both validators then do full signature and lifetime validation. Claiming to be
-Entra does not skip validation, it opts you into stricter validation against
-Microsoft's published keys, which an attacker cannot sign for. The test above is
-what turns that from an argument into evidence.
+An earlier version of this file said no Microsoft-signed token had ever reached
+this API. That is no longer true, and the way it stopped being true is itself
+worth recording.
 
 ---
 
-## Not verified
+## Verified end to end
 
-**A real Entra-issued access token has never reached this API.**
+A real Entra-issued access token authenticates against this API. Three calls to
+`GET /api/orders/whoami`, which requires authentication and no policy:
 
-The app registration exists in the tenant and the configuration in
-`appsettings.json` (`TenantId`, `ClientId`, `Audience`) points at it. Those are
-public identifiers, not secrets — an API that only *validates* tokens needs no
-client secret, because it verifies signatures against Microsoft's published
-JWKS endpoint at
-`https://login.microsoftonline.com/{tenant}/v2.0/.well-known/openid-configuration`.
+```
+no token    -> 401
+junk token  -> 401
+Entra token -> 200
+```
 
-What fails is the step before that: obtaining a token to send.
+and the body of the third:
+
+```json
+{
+  "authenticated": true,
+  "issuer": "https://login.microsoftonline.com/03490f7a-f873-47af-9963-ae925b4871b8/v2.0",
+  "validated_by": "EntraJwt",
+  "name": "Shruti Sahrawat",
+  "claims": [
+    { "type": "aud", "value": "62fe0e7f-3b56-443e-82d0-baa577371525" },
+    { "type": "azp", "value": "04b07795-8ddb-461a-bbee-02f9e1bf7b46" },
+    { "type": "http://schemas.microsoft.com/identity/claims/scope", "value": "access_as_user" },
+    { "type": "preferred_username", "value": "shruti9shruti4@gmail.com" },
+    { "type": "ver", "value": "2.0" }
+  ]
+}
+```
+
+Every link in the chain is exercised: Microsoft issued the token, the
+`JwtBearerHandler` fetched the signing keys from the tenant's published JWKS
+endpoint and verified the signature asymmetrically, the audience and lifetime
+checks passed, and the policy scheme routed the request to `EntraJwt` on the
+strength of the issuer claim. `azp` shows the Azure CLI as the calling client,
+which is the pre-authorisation working.
+
+The two 401s matter as much as the 200. A malformed token is rejected rather
+than waved through, and the no-token case never reaches the handler at all.
+
+---
+
+## The tenant this was proven in, and the one it was not
+
+**Proven in:** `03490f7a-f873-47af-9963-ae925b4871b8` — a personal Entra
+directory where I am Global Administrator, so I could grant the scope to myself.
+
+**Not proven in:** the institutional thinkbridge tenant,
+`b69d82df-4ebe-474d-9ac7-00efbf13427e`. The original blocker there is
+unchanged:
 
 ```
 AADSTS65005: The application asked for permissions to access a resource
 that is not available, or the scope 'access_as_user' has not been granted.
 ```
 
-The tenant is an institutional one where granting an API scope requires an
-administrator, and I do not hold that role in it. `az account get-access-token
---resource api://{client-id}` and the SPA consent flow both stop at the same
-place. This is an access-control fact about the tenant, not a defect in the code
-under test — but the distinction does not matter for the claim being made. The
-Entra branch is unexercised, and I will not report it as working.
+Granting an API scope in that tenant requires an administrator and I do not hold
+that role. **I routed around the blocker rather than through it**, and the
+distinction should not be blurred: what is proven is that the *code* validates
+Entra tokens correctly, not that the thinkbridge registration is configured.
+
+That is also the honest thing to do when waiting on someone else's approval at
+work. Prove the code against a tenant you control, keep moving, and swap three
+configuration values when the grant lands. The three values are `TenantId`,
+`ClientId` and `Audience` in `appsettings.json`. No code changes.
 
 ---
 
-## What would close it
+## Two things that would have silently broken this
 
-In rough order of how quickly each could be done:
+Recorded because both produce a 401 that looks like a signing failure and is
+not.
 
-1. **A tenant where I am the admin.** A personal Azure AD tenant on a free
-   subscription takes about ten minutes: register the API, expose an
-   `access_as_user` scope, grant admin consent to a test client, then
-   `az account get-access-token --resource api://{client-id}` and curl the
-   result at `POST /api/orders`. The tenant IDs in config would change; nothing
-   in `Program.cs` would.
-2. **Admin consent in the existing tenant.** One approval on the existing
-   registration, then the same two commands.
-3. **A signing-key stub against the real handler.** Stand up a local JWKS
-   endpoint, point `Authority` at it, and issue tokens signed with a key it
-   publishes. This proves that `JwtBearerHandler` fetches the key set, validates
-   the signature asymmetrically, and enforces audience and lifetime — everything
-   in the Entra path except Microsoft itself. It is the most thorough option and
-   the most work, and it is what I would build if this were shipping.
+**Token version.** `Program.cs` sets
+`Authority = https://login.microsoftonline.com/{tenant}/v2.0`, which expects a
+v2 issuer. A default app registration issues **v1** tokens, whose issuer is
+`https://sts.windows.net/{tenant}/`. Those fail issuer validation — and worse,
+`IssuerSchemeSelector` matches on the prefix `https://login.microsoftonline.com/`,
+so a v1 token would not even reach the Entra validator. It would fall through to
+the internal scheme and be rejected there, for a completely unrelated reason.
+Setting `requestedAccessTokenVersion = 2` on the registration is what makes the
+two halves agree.
 
-Option 3 is the honest answer to "what if you never get the tenant." I did not
-build it because a scope-grant approval is a smaller ask than a JWKS harness,
-and because inventing an elaborate substitute risks looking like proof when it
-is still not the real thing.
+**Audience shape.** With `requestedAccessTokenVersion = 2`, the `aud` claim is
+the bare client-id GUID, *not* `api://{client-id}`. Configuring the latter is a
+401 with no useful diagnostic. The value in `appsettings.json` was set by reading
+the decoded token rather than by assuming.
 
 ---
 
-## What I would not do
+## Reproducing it
 
-Assert that the Entra path works because the code looks right. It is the
-authentication boundary of the application; "looks right" is the standard that
-produces the security incidents. The two schemes are independently registered
-and independently validated, so the unverified branch cannot weaken the verified
-one — but until a Microsoft-signed token has been accepted by this API, the
-correct status is *unverified*, and that is what this repository claims.
+```powershell
+az login --tenant 03490f7a-f873-47af-9963-ae925b4871b8 --allow-no-subscriptions
+$appId = "62fe0e7f-3b56-443e-82d0-baa577371525"
+$token = az account get-access-token --scope "api://$appId/access_as_user" --query accessToken -o tsv
+curl.exe -s -H "Authorization: Bearer $token" http://localhost:5021/api/orders/whoami
+```
+
+The registration was created entirely from the CLI — app registration, exposed
+scope, and pre-authorisation of the Azure CLI's own client id
+(`04b07795-8ddb-461a-bbee-02f9e1bf7b46`) against that scope. That last step is
+the one most walkthroughs omit: the CLI is just another client application, and
+the API has to trust it before Entra will issue a token for the scope. Without
+it you get a consent prompt that cannot be completed non-interactively, which
+looks exactly like the `AADSTS65005` this started with.
+
+Note also that the two scopes cannot be created and pre-authorised in a single
+Graph `PATCH` — the permission id does not exist yet when the request is
+validated, and the whole call is rejected atomically. It takes two.
+
+---
+
+## What I would still not claim
+
+That the thinkbridge registration works. It has never been exercised, and the
+only way to know is to obtain the grant and run the same three curls against it.
+The code path is proven; that particular configuration is not.

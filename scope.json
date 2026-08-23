@@ -1,0 +1,17 @@
+{
+    "api":  {
+                "oauth2PermissionScopes":  [
+                                               {
+                                                   "id":  "3be9cf3e-1417-49b4-81e4-d6d1c573fa03",
+                                                   "userConsentDescription":  "Allow the application to access QuotesApi on your behalf.",
+                                                   "adminConsentDescription":  "Allow the calling application to access QuotesApi as the signed-in user.",
+                                                   "type":  "User",
+                                                   "value":  "access_as_user",
+                                                   "isEnabled":  true,
+                                                   "userConsentDisplayName":  "Access QuotesApi",
+                                                   "adminConsentDisplayName":  "Access QuotesApi"
+                                               }
+                                           ],
+                "requestedAccessTokenVersion":  2
+            }
+}
