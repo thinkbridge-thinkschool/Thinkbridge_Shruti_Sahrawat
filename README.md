@@ -1,6 +1,6 @@
 # Thinkbridge Backend Assignment — Shruti Sahrawat
 
-Days 1–12. All code in this repository. **207 tests passing** across three test projects.
+Days 1–13. All code in this repository. **207 tests passing** across three test projects, plus an Angular 21 front end in [`quotes-ui/`](quotes-ui).
 
 | Suite | Tests | Runtime |
 |---|---|---|
@@ -347,3 +347,38 @@ Window functions and set operations are in the same folder: [`sql/WINDOW-FUNCTIO
 [`QuotesApi/Features/Collections/DAPPER.md`](QuotesApi/Features/Collections/DAPPER.md) — the same read path in hand-written SQL, timed against the EF version, with the rule I would give a teammate for when to drop to Dapper.
 
 Both implementations are held to the same contract by [`CollectionSummariesReadPathTests`](Quotes.Tests.Integration/CollectionSummariesReadPathTests.cs), which asserts they return identical results at four preview sizes, with an owner filter, for an empty collection, and when a previewed quote has been deleted underneath them. A faster query that answers a different question is not an optimisation.
+
+---
+
+## Day 13 — Signals, zoneless, standalone
+
+[`quotes-ui/`](quotes-ui) — an Angular 21 client for the Week-1 Quotes API.
+One screen: a paged, filtered list read from `GET /api/quotes`.
+
+The exercise was to *direct* an agent rather than hand-type components, so the
+artefacts are three: [`BRIEF.md`](quotes-ui/BRIEF.md) is the prompt,
+[`src/app/`](quotes-ui/src/app) is what came back, and
+[`VERIFICATION.md`](quotes-ui/VERIFICATION.md) is what happened when it was run.
+
+Standalone throughout with no `NgModule`, `inject()` rather than constructor
+injection, `signal` / `computed` / `linkedSignal` / `effect` for state, and
+`@if` / `@for` with `track` / `@switch` in the template. Zoneless — which in
+Angular 21 means *not* adding a provider, since it is now the default and
+`provideZoneChangeDetection()` is the opt-out.
+
+**Three bugs, all found by running it rather than reading it.** `status()` on
+`HttpResourceRef` is the resource lifecycle, not the HTTP status — `statusCode()`
+is, and it is `undefined` rather than `0` when nothing answered. A `?? 0`
+fallback on `totalCount` collapsed the pager to "Page 3 of 1 (0 quotes total)"
+during every refetch, because the count was *late* rather than absent;
+`linkedSignal` exists for exactly that. And a request that never settles renders
+as `loading` indefinitely — the dev proxy refused a connection and never
+answered, so the error branch never ran at all. `loading`, `error` and `ready`
+are not exhaustive; **"never answered" is a fourth state**, and that was a gap in
+the brief, not only in the code.
+
+The screen also demonstrates the limit of client-side filtering against a paged
+API: with 10,000 rows and a page size of 100, filtering for an author who exists
+but is not on the current page reports no matches. Accurate about the page,
+misleading about the collection — a scope decision rather than an oversight,
+since the API exposes no author filter.
