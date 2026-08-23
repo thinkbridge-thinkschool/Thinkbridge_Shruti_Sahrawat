@@ -1,0 +1,145 @@
+:host {
+  display: block;
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 4rem;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #1b1725;
+  line-height: 1.55;
+}
+
+@media (prefers-color-scheme: dark) {
+  :host { color: #ece8f4; }
+}
+
+h1 {
+  margin: 0;
+  font-size: 2rem;
+  letter-spacing: -0.02em;
+}
+
+.sub {
+  margin: 0.25rem 0 0;
+  color: #6e6780;
+  font-size: 0.9rem;
+}
+
+code {
+  font-family: ui-monospace, "Cascadia Code", monospace;
+  font-size: 0.86em;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 1.75rem 0;
+}
+
+.controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6e6780;
+}
+
+.controls input {
+  font: inherit;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #cfc7de;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+}
+
+.controls input[type="number"] { width: 7rem; }
+
+.state {
+  padding: 1.25rem;
+  border: 1px solid #e5e0ee;
+  border-radius: 8px;
+  color: #4a4358;
+}
+
+@media (prefers-color-scheme: dark) {
+  .state { border-color: #2e2a3c; color: #c0b9d0; }
+  .controls input { border-color: #3a3450; }
+}
+
+.state.error {
+  border-left: 3px solid #a83a28;
+}
+
+.state .detail {
+  margin: 0.4rem 0 0.9rem;
+  font-size: 0.88rem;
+}
+
+.quotes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.quotes li {
+  border: 1px solid #e5e0ee;
+  border-radius: 8px;
+  padding: 1rem 1.15rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .quotes li { border-color: #2e2a3c; }
+}
+
+blockquote {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.quotes footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.6rem;
+  font-size: 0.82rem;
+  color: #6e6780;
+}
+
+cite { font-style: normal; font-weight: 600; }
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 2rem;
+  font-size: 0.9rem;
+}
+
+.pager small { color: #6e6780; }
+
+button {
+  font: inherit;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid #cfc7de;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+button:disabled { opacity: 0.45; cursor: default; }
+
+button:not(:disabled):hover { border-color: #5b3fa8; }
+
+button:focus-visible { outline: 2px solid #5b3fa8; outline-offset: 2px; }
