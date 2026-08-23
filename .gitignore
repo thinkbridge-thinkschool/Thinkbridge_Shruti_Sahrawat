@@ -33,3 +33,7 @@ Quotes.Benchmark/BenchmarkDotNet.Artifacts/*.log
 commitmsg.txt
 diff-output.txt
 test-output*.txt
+
+# local test and coverage captures
+coverage-run.txt
+order-tests.txt
