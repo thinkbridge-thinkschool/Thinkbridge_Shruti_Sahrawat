@@ -1,0 +1,29 @@
+# Line-ending normalisation.
+#
+# Without this, a Windows checkout rewrites CRLF into every tracked file and
+# `git status` reports the whole tree as modified with zero content change
+# (8,290 insertions against 8,290 deletions, all whitespace). Git now stores
+# LF in the repository and checks out whatever the platform wants.
+#
+# After adding this file, run once to fix the history-to-worktree mismatch:
+#     git add --renormalize .
+#     git commit -m "Normalise line endings"
+
+* text=auto
+
+# Binary — never touched, never diffed as text.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.db    binary
+*.snk   binary
+
+# Scripts are format-sensitive: a .sh with CRLF fails on Linux with
+# "bad interpreter", a .cmd with LF misbehaves on Windows.
+*.sh    text eol=lf
+*.ps1   text eol=crlf
+*.cmd   text eol=crlf
+*.bat   text eol=crlf

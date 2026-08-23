@@ -5,6 +5,10 @@ namespace Quotes.Tests.Unit;
 
 public class CollectionTests
 {
+    // The aggregate takes the instant rather than reading the clock, so every
+    // AddItem call in these tests states the time explicitly.
+    private static readonly DateTimeOffset At = new(2026, 3, 14, 9, 30, 0, TimeSpan.Zero);
+
     [Fact]
     public void Constructor_ValidNameAndOwnerId_SetsProperties()
     {
@@ -81,7 +85,7 @@ public class CollectionTests
     {
         var collection = new Collection("My Collection", "owner-1");
 
-        collection.AddItem(42);
+        collection.AddItem(42, At);
 
         collection.Items.Should().ContainSingle(i => i.QuoteId == 42);
     }
@@ -90,9 +94,9 @@ public class CollectionTests
     public void AddItem_DuplicateQuoteId_ThrowsInvalidOperationException()
     {
         var collection = new Collection("My Collection", "owner-1");
-        collection.AddItem(100);
+        collection.AddItem(100, At);
 
-        var act = () => collection.AddItem(100);
+        var act = () => collection.AddItem(100, At);
 
         act.Should().Throw<InvalidOperationException>();
     }
@@ -103,10 +107,10 @@ public class CollectionTests
         var collection = new Collection("My Collection", "owner-1");
         for (var i = 1; i <= 50; i++)
         {
-            collection.AddItem(i);
+            collection.AddItem(i, At);
         }
 
-        var act = () => collection.AddItem(51);
+        var act = () => collection.AddItem(51, At);
 
         act.Should().Throw<InvalidOperationException>();
     }
@@ -117,10 +121,10 @@ public class CollectionTests
         var collection = new Collection("My Collection", "owner-1");
         for (var i = 1; i <= 49; i++)
         {
-            collection.AddItem(i);
+            collection.AddItem(i, At);
         }
 
-        var act = () => collection.AddItem(50);
+        var act = () => collection.AddItem(50, At);
 
         act.Should().NotThrow();
     }
@@ -129,7 +133,7 @@ public class CollectionTests
     public void RemoveItem_ExistingQuoteId_RemovesFromItemsCollection()
     {
         var collection = new Collection("My Collection", "owner-1");
-        collection.AddItem(42);
+        collection.AddItem(42, At);
 
         collection.RemoveItem(42);
 

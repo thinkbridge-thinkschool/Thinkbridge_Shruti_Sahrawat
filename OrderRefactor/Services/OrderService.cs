@@ -9,17 +9,20 @@ public class OrderService : IOrderService
     private readonly IDiscountCalculator _discountCalculator;
     private readonly IConfiguration _config;
     private readonly ILogger<OrderService> _logger;
+    private readonly IClock _clock;
 
     public OrderService(
         IOrderRepository repository,
         IDiscountCalculator discountCalculator,
         IConfiguration config,
-        ILogger<OrderService> logger)
+        ILogger<OrderService> logger,
+        IClock clock)
     {
         _repository = repository;
         _discountCalculator = discountCalculator;
         _config = config;
         _logger = logger;
+        _clock = clock;
     }
 
     public async Task<OrderResponse> CreateOrderAsync(CreateOrderRequest request, CancellationToken ct)
@@ -70,7 +73,10 @@ public class OrderService : IOrderService
             DiscountCode = request.DiscountCode,
             Status = "Pending",
             Items = orderItems,
-            Total = total
+            Total = total,
+            // From the injected clock, not DateTime.UtcNow, so a test can assert
+            // the exact value rather than a tolerance window around "now".
+            CreatedAt = _clock.UtcNow.UtcDateTime
         };
 
         var created = await _repository.AddOrderAsync(order, ct);

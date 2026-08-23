@@ -7,6 +7,8 @@ using Xunit;
 
 public class CollectionDomainTests
 {
+    private static readonly DateTimeOffset At = new(2026, 3, 14, 9, 30, 0, TimeSpan.Zero);
+
     [Fact]
     public void EmptyOrInvalidName_ThrowsException()
     {
@@ -20,19 +22,19 @@ public class CollectionDomainTests
         var collection = new Collection("My Collection", "owner-1");
         for (int i = 1; i <= 50; i++)
         {
-            collection.AddItem(i);
+            collection.AddItem(i, At);
         }
 
-        Assert.Throws<InvalidOperationException>(() => collection.AddItem(51));
+        Assert.Throws<InvalidOperationException>(() => collection.AddItem(51, At));
     }
 
     [Fact]
     public void DuplicateQuoteId_ThrowsException()
     {
         var collection = new Collection("My Collection", "owner-1");
-        collection.AddItem(100);
+        collection.AddItem(100, At);
 
-        Assert.Throws<InvalidOperationException>(() => collection.AddItem(100));
+        Assert.Throws<InvalidOperationException>(() => collection.AddItem(100, At));
     }
 
     [Fact]
@@ -47,7 +49,7 @@ public class CollectionDomainTests
     public void AddingThenRemovingItem_LeavesZeroItems()
     {
         var collection = new Collection("My Collection", "owner-1");
-        collection.AddItem(42);
+        collection.AddItem(42, At);
         
         collection.RemoveItem(42);
 

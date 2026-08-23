@@ -1,4 +1,4 @@
-﻿using Serilog;
+using Serilog;
 using Microsoft.Extensions.Http.Resilience;
 using Polly;
 using Polly.Retry;
@@ -32,20 +32,48 @@ if (!string.IsNullOrWhiteSpace(appInsightsConnectionString))
     otel.UseAzureMonitor(o => o.ConnectionString = appInsightsConnectionString);
 }
 
+// Where to ship spans. Was a hardcoded http://localhost:4317, which is correct
+// on exactly one machine and silently wrong everywhere else:
+//
+//   * In Azure there is no collector on localhost, so every span was exported
+//     into nothing. Same failure mode as the App Insights connection-string bug
+//     from Day 5 - no error, no log line, just no telemetry.
+//   * Under `dotnet test` there is no collector either, but the failure is loud
+//     rather than silent: every export attempt waits out its timeout and every
+//     WebApplicationFactory disposal blocks on a final flush. The integration
+//     suite went from seconds to 41 minutes.
+//
+// Now it comes from configuration, and no configured endpoint means no exporter.
+var otlpEndpoint =
+    builder.Configuration["Otel:OtlpEndpoint"]
+    ?? builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"];
+
 otel
     .ConfigureResource(r => r.AddService(
         serviceName: "QuotesApi",
         serviceVersion: "1.0.0"))
-    .WithTracing(t => t
-        .AddAspNetCoreInstrumentation()
-        .AddEntityFrameworkCoreInstrumentation()
-        .AddHttpClientInstrumentation()
-        .AddConsoleExporter()
-        .AddOtlpExporter(o =>
+    .WithTracing(t =>
+    {
+        t.AddAspNetCoreInstrumentation()
+         .AddEntityFrameworkCoreInstrumentation()
+         .AddHttpClientInstrumentation();
+
+        if (!string.IsNullOrWhiteSpace(otlpEndpoint))
         {
-            o.Endpoint = new Uri("http://localhost:4317");
-            o.Protocol = OtlpExportProtocol.Grpc;
-        }));
+            t.AddOtlpExporter(o =>
+            {
+                o.Endpoint = new Uri(otlpEndpoint);
+                o.Protocol = OtlpExportProtocol.Grpc;
+            });
+        }
+
+        // Writing every span to stdout is a debugging aid, not a deployment
+        // strategy: it is synchronous console I/O on the request path.
+        if (builder.Environment.IsDevelopment())
+        {
+            t.AddConsoleExporter();
+        }
+    });
 
 // Named HttpClient with Polly-backed resilience (retry, circuit breaker, timeout).
 builder.Services.AddHttpClient("my-service", client =>

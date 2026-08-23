@@ -1,4 +1,4 @@
-﻿using System.IdentityModel.Tokens.Jwt;
+using OrderRefactor.Authentication;
 using OrderRefactor.Configuration;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -22,13 +22,30 @@ var jwtOptions = builder.Configuration
     .GetSection(JwtOptions.SectionName).Get<JwtOptions>()
     ?? throw new InvalidOperationException("Jwt configuration section is missing");
 
-var jwtKey = jwtOptions.Key;
-var keyBytes = Encoding.UTF8.GetBytes(jwtKey);
+// Jwt:Key is deliberately absent from appsettings.json. A signing key committed
+// to the repository is a signing key every past and future contributor holds,
+// and rotating it means a release rather than a config change.
+//
+// The options binding above already carries [Required] + [MinLength(32)] and is
+// wired with ValidateOnStart, but that validation runs after this line, and
+// SymmetricSecurityKey throws an unhelpful "key length must be greater than 0"
+// on an empty string. Failing here says what to actually do about it.
+if (string.IsNullOrWhiteSpace(jwtOptions.Key) || jwtOptions.Key.Length < 32)
+{
+    throw new InvalidOperationException(
+        "Jwt:Key is missing or shorter than 32 characters.\n" +
+        "Local development:  dotnet user-secrets set \"Jwt:Key\" \"<32+ characters>\" --project OrderRefactor\n" +
+        "Tests:              supplied in-memory by the WebApplicationFactory setup.\n" +
+        "Production:         a Key Vault reference exposed as the Jwt__Key environment variable.");
+}
 
-// Define scheme names
-const string InternalSchemeName = "InternalJwt";
-const string EntraSchemeName = "EntraJwt";
-const string PolicySchemeName = "PolicyScheme";
+var keyBytes = Encoding.UTF8.GetBytes(jwtOptions.Key);
+
+// Scheme names live on IssuerSchemeSelector so the router and the registrations
+// cannot drift apart.
+const string InternalSchemeName = IssuerSchemeSelector.InternalScheme;
+const string EntraSchemeName = IssuerSchemeSelector.EntraScheme;
+const string PolicySchemeName = IssuerSchemeSelector.PolicyScheme;
 
 var azureAdTenantId = builder.Configuration["AzureAd:TenantId"];
 var azureAdClientId = builder.Configuration["AzureAd:ClientId"];
@@ -64,34 +81,15 @@ builder.Services.AddAuthentication(PolicySchemeName)
     })
     .AddPolicyScheme(PolicySchemeName, "Policy Scheme", options =>
     {
-        // This scheme peeks at the token and forwards to either InternalJwt or EntraJwt
+        // Peeks at the token's issuer and forwards to whichever validator owns it.
+        // The decision itself lives in IssuerSchemeSelector, which is unit tested
+        // across every branch without booting the app or touching the network.
+        // The internal issuer is passed from the same options object the internal
+        // validator uses for ValidIssuer, so the two cannot disagree.
         options.ForwardDefaultSelector = context =>
-        {
-            var authHeader = context.Request.Headers["Authorization"].FirstOrDefault();
-            if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Bearer "))
-                return InternalSchemeName; // Default fallback
-
-            var token = authHeader.Substring("Bearer ".Length).Trim();
-            
-            try
-            {
-                var handler = new JwtSecurityTokenHandler();
-                var jwt = handler.ReadJwtToken(token);
-                var issuer = jwt.Issuer;
-
-                if (issuer == "OrderRefactorIssuer")
-                    return InternalSchemeName;
-                
-                if (issuer?.StartsWith("https://login.microsoftonline.com/") == true)
-                    return EntraSchemeName;
-            }
-            catch
-            {
-                // If token is malformed or unreadable, let default handler deal with it
-            }
-
-            return InternalSchemeName; // Safe default
-        };
+            IssuerSchemeSelector.SelectScheme(
+                context.Request.Headers.Authorization.FirstOrDefault(),
+                jwtOptions.Issuer);
     });
 
 // Add Authorization with Policies

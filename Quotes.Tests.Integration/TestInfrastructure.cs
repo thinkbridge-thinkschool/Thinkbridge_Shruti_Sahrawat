@@ -1,8 +1,10 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using QuotesApi.Data;
@@ -42,6 +44,32 @@ internal static class TestInfrastructure
 
         var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
+            // Not Development. WebApplicationFactory defaults to it, which switched on
+            // EnableSensitiveDataLogging, LogTo(Console.WriteLine) and the OpenTelemetry
+            // console exporter - thousands of lines of synchronous console I/O per test,
+            // for output nobody reads unless something fails.
+            builder.UseEnvironment("Testing");
+
+            // Serilog is configured inside UseSerilog, which runs when the host is
+            // built, so overrides added here do reach it. Anything Program.cs reads
+            // at *builder* time does not — see TestEnvironment, which clears the
+            // telemetry exporters out of the environment instead.
+            //
+            // appsettings.json puts EF's SQL logging at Debug. That is the right
+            // default for local development and ruinous across a few hundred
+            // per-test databases: thousands of lines of synchronous console I/O.
+            // Raise it temporarily if you are debugging a failing test.
+            builder.ConfigureAppConfiguration((context, config) =>
+            {
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Serilog:MinimumLevel:Default"] = "Warning",
+                    ["Serilog:MinimumLevel:Override:Microsoft"] = "Warning",
+                    ["Serilog:MinimumLevel:Override:Microsoft.EntityFrameworkCore"] = "Warning",
+                    ["Serilog:MinimumLevel:Override:Microsoft.EntityFrameworkCore.Database.Command"] = "Warning"
+                });
+            });
+
             builder.ConfigureServices(services =>
             {
                 // AddDbContext is additive across calls: it chains every registered

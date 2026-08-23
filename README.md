@@ -1,12 +1,14 @@
 # Thinkbridge Backend Assignment — Shruti Sahrawat
 
-Days 1–7. All code in this repository. **141 tests passing** across three test projects. CI is currently red on a coverage gate, not on test failures — see [CI status](#running-it).
+Days 1–12. All code in this repository. **207 tests passing** across three test projects.
 
 | Suite | Tests | Runtime |
 |---|---|---|
-| `OrderRefactor.Tests` | 21 | ~2s |
-| `Quotes.Tests.Unit` | 97 | ~1s |
-| `Quotes.Tests.Integration` | 23 | ~14s (real SQL Server 2022 container) |
+| `OrderRefactor.Tests` | 41 | ~5s |
+| `Quotes.Tests.Unit` | 123 | ~1s |
+| `Quotes.Tests.Integration` | 43 | ~2m37s, of which ~100s is Docker starting SQL Server 2022 |
+
+Coverage is gated once, on the union of all three suites — see [Day 4](#day-4--observability).
 
 Two applications: **QuotesApi** (minimal API, DDD aggregate) and **OrderRefactor** (layered refactor, JWT auth, Entra ID).
 
@@ -39,9 +41,13 @@ An aggregate root that enforces its own invariants: name 3–80 characters, maxi
 
 ## Day 2 — Architecture and Authentication
 
-**Piece 1 — Dependency injection at depth** *(partial — see note)*
-[`QuotesApi/Services/IClock.cs`](QuotesApi/Services/IClock.cs) · [`SystemClock.cs`](QuotesApi/Services/SystemClock.cs), registered as a singleton in [`Program.cs`](QuotesApi/Program.cs). Repositories and `DbContext` scoped; `DiscountCalculator` transient.
-**Known gap:** `IClock` is registered and covered by fake-clock tests against the `Quote.Create(author, text, clock)` overload, but `EndpointExtensions` still calls the two-argument overload, so the clock is never consulted on the live request path. `CollectionItem` and `AuthController` also still call `DateTime.UtcNow` directly. The abstraction exists and is testable; it is not yet threaded through production.
+**Piece 1 — Dependency injection at depth**
+[`QuotesApi/Services/IClock.cs`](QuotesApi/Services/IClock.cs) · [`OrderRefactor/Services/IClock.cs`](OrderRefactor/Services/IClock.cs)
+All three lifetimes, chosen rather than defaulted: `DbContext` and the repositories **scoped**, because the change tracker is a per-request unit of work and is not thread-safe; `DiscountCalculator` **transient**, because it is stateless and sharing an instance buys nothing; `IClock` **singleton**, because it holds nothing at all. The classic failure this avoids is the captive dependency — a singleton holding a scoped `DbContext` and quietly corrupting state across requests.
+
+No production code path reads the ambient clock any more. The domain does not depend on `IClock` either: `Quote.Create` and `Collection.AddItem` take a `DateTimeOffset`, and the application layer — the endpoint handler, the MediatR handler, `AuthController`, `OrderService` — owns the clock and passes the instant down. An entity that goes looking for the time cannot be asserted against exactly, and every timestamp test here now asserts an exact value instead of `BeCloseTo(DateTime.UtcNow, 5 seconds)`.
+
+Proven end to end rather than by inspection: [`CreateQuote_WithClockOverridden_PersistsTheClockInstantAndReadsItBack`](Quotes.Tests.Integration/QuoteEndpointsTests.cs) overrides `IClock` in the test host, posts a quote, and reads the row back out of SQL Server to confirm the injected instant was stored — not merely echoed in the response.
 
 **Piece 2 — async/await with cancellation through layers**
 `CancellationToken` is the last parameter on every I/O method and flows controller → service → repository → EF. See [`IOrderRepository.cs`](OrderRefactor/Repositories/IOrderRepository.cs) and [`QuoteRepository.cs`](QuotesApi/Repositories/QuoteRepository.cs). Cancellation is tested, not assumed: [`CollectionsControllerCancellationTests.cs`](OrderRefactor.Tests/CollectionsControllerCancellationTests.cs).
@@ -63,7 +69,7 @@ Proven end-to-end in [`RefreshTokenTests.cs`](OrderRefactor.Tests/RefreshTokenTe
 
 ## Day 3 — Enterprise Auth and Testing
 
-**Wire Entra ID as the identity provider** *(config complete, live token untested — see note)*
+**Wire Entra ID as the identity provider** *(config complete, live token unverified — full account in [`docs/ENTRA-VERIFICATION.md`](OrderRefactor/docs/ENTRA-VERIFICATION.md))*
 [`OrderRefactor/Program.cs`](OrderRefactor/Program.cs) registers two bearer schemes behind a policy scheme:
 Request with Bearer token
 ↓
@@ -75,7 +81,11 @@ iss == "OrderRefactorIssuer"?
 ↓
 [Authorize] resolves as normal — controllers unchanged
 Entra configuration (`TenantId`, `ClientId`, `Audience`) lives in `appsettings.json`; these are public identifiers, not secrets. Authority is `https://login.microsoftonline.com/{tenant}/v2.0`. No client secret is needed anywhere — an API that only validates tokens uses Microsoft's published signing keys.
-**Known gap:** the application is registered in Entra and the code path is in place, but I could not obtain a real Entra access token to verify end-to-end. The institutional tenant rejected the `access_as_user` scope grant (`AADSTS65005`). The internal JWT path is verified working; the Entra branch is unverified against a live token.
+**Known gap:** the application is registered in Entra and the code path is in place, but I could not obtain a real Entra access token to verify end-to-end. The institutional tenant rejected the `access_as_user` scope grant (`AADSTS65005`). The internal JWT path is verified working; the Entra branch has never seen a Microsoft-signed token.
+
+What *is* proven is the routing decision, which used to be an untestable lambda inside `Program.cs`: reaching it meant booting the app and letting the Entra handler make a live call to `login.microsoftonline.com` for its key set. It now lives in [`IssuerSchemeSelector`](OrderRefactor/Authentication/IssuerSchemeSelector.cs) with [20 tests](OrderRefactor.Tests/IssuerSchemeSelectorTests.cs) covering every branch in microseconds, no network involved.
+
+Extracting it surfaced two defects. The lambda compared the issuer against a hardcoded `"OrderRefactorIssuer"` while the validator it routes to reads `ValidIssuer` from configuration — rename `Jwt:Issuer` and every internally-issued token would have been routed to the Entra validator and rejected. And it matched `"Bearer "` case-sensitively, which RFC 7235 says is wrong. Both are now regression-tested.
 
 **Authorization policies and claims**
 `AdminOnly` (claim-based) and `CanEditOwnOrders` (custom assertion) defined in [`Program.cs`](OrderRefactor/Program.cs), applied at [`OrderController.CreateOrder`](OrderRefactor/Controllers/OrderController.cs). Authentication answers *who you are*; policies answer *what you may do*. Roles are claims that change; policies encode rules that don't.
@@ -84,7 +94,9 @@ Entra configuration (`TenantId`, `ClientId`, `Audience`) lives in `appsettings.j
 [`OrderControllerTests.cs`](OrderRefactor.Tests/OrderControllerTests.cs) + [`RefreshTokenTests.cs`](OrderRefactor.Tests/RefreshTokenTests.cs) — 21 tests: anonymous → 401, authenticated but wrong policy → 403, correct policy → 201, expired token → 401, malformed token → 401, revoked refresh chain → 401.
 
 **The testing pyramid in real terms**
-Reflected in the actual shape of the suites: 97 unit tests at ~3ms each, 44 integration tests at ~200ms–600ms, no end-to-end layer. The lesson that stuck is that the pyramid is about *time*, not test count — 23 integration tests consume more wall-clock than 97 unit tests, so the ratio that matters is the one on the stopwatch.
+Reflected in the actual shape of the suites: 164 unit tests running in about a second between them, 43 integration tests taking over two minutes. The lesson that stuck is that the pyramid is about *time*, not test count — 43 integration tests consume roughly a hundred times the wall-clock of 164 unit tests, so the ratio that matters is the one on the stopwatch.
+
+Writing `ExceptionHandlingMiddlewareTests` made the point from the other direction. That middleware had no coverage at all, and no integration test could have given it any: nothing in a healthy request throws, so a global exception handler is only reachable by handing it something that fails. A unit test with a hostile `RequestDelegate` does that in microseconds. The code was not hard to test — the tier was wrong.
 
 **xUnit with FluentAssertions**
 [`Quotes.Tests.Unit/`](Quotes.Tests.Unit) — one test class per production class, `Method_StateUnderTest_ExpectedBehavior` naming, explicit AAA in every test, no `SetUp` hiding arrangement, `[Theory]`/`[InlineData]` for boundaries. NSubstitute for `IOrderRepository`, `IConfiguration`, and `ILogger<T>`.
@@ -117,7 +129,47 @@ The session's real lesson was not the OTel configuration. Zero spans appeared fo
 **Configuration with IOptions**
 [`OrderRefactor/Configuration/JwtOptions.cs`](OrderRefactor/Configuration/JwtOptions.cs)
 A typed options class with data annotations, bound with `ValidateDataAnnotations().ValidateOnStart()` and injected as `IOptions<JwtOptions>` into [`AuthController`](OrderRefactor/Controllers/AuthController.cs). This replaced scattered `_configuration["Jwt:Key"]` lookups and removed two real defects: a hardcoded fallback signing key that would have silently signed tokens if config went missing, and a token lifetime duplicated as `AddMinutes(15)` in one place and `expires_in = 900` in another. `ValidateOnStart` also turns a too-short signing key from a runtime failure at first login into a startup failure.
-**Known gap:** `Jwt:Key` is still committed in `appsettings.json`. It belongs in user-secrets locally and Key Vault in production; left in place to avoid changing test fixtures. Commit `cff28d4`.
+`Jwt:Key` is no longer in `appsettings.json`. Local development reads it from `dotnet user-secrets`; production expects a Key Vault reference surfaced as the `Jwt__Key` environment variable; and `Program.cs` refuses to start without it, with a message naming all three. A second dead `Jwt` section — complete with a signing key — was removed from `QuotesApi/appsettings.json`, where nothing had ever read it: that application registers no authentication at all.
+
+The tests supply their own key through the environment rather than through the test host's in-memory configuration, and the reason is a timing detail worth recording. `Program.cs` reads the key while the builder is still being configured, because `AddJwtBearer` needs it to construct `TokenValidationParameters`. `WebApplicationFactory` collects `ConfigureAppConfiguration` delegates in a `DeferredHostBuilder` and replays them when the host is *built* — after the entry point has already read the value. Configuration supplied that way arrives one step too late and is silently ignored. See [`TestJwt`](OrderRefactor.Tests/TestJwt.cs). Commit `cff28d4`.
+
+**Continuous integration and the coverage gate**
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) · [`coverlet.runsettings`](coverlet.runsettings) · [`scripts/check-coverage.py`](scripts/check-coverage.py)
+
+Three test projects run as a matrix with `fail-fast` off, each uploading its Cobertura report, and a fourth job gates once on the **union** of all three.
+
+Gating each project separately is the thing that does not work, and it is worth being precise about why rather than just lowering the number. `Quotes.Tests.Unit` never boots the application, so 150-odd lines of DI, Serilog, OpenTelemetry and Polly wiring in `Program.cs` sit in its report permanently uncovered — no quantity of honest unit tests moves them. `Quotes.Tests.Integration` boots the app but owns none of the pure domain assertions. Every line either suite covers is a line the codebase has a test for, so the only meaningful question is asked across the whole suite.
+
+Getting to a trustworthy number meant fixing the measurement twice before writing a single test.
+
+*The filters were selecting the wrong code.* The exclude was written `[*.Migrations]*`, which matches an **assembly** named `something.Migrations`. No such assembly exists here — EF Core's generated migrations, snapshots and designer files live inside the `QuotesApi` and `OrderRefactor` assemblies, so roughly 900 lines of generated code were being counted as untested application code. The include swept in `OrderRefactor.Original.OrderController` as well: 255 lines kept deliberately unmodified as the "before" half of the Day 1 refactor, code that exists in order to be bad.
+
+*The merge was double-counting.* Cobertura stores a `<sources>` root and writes each filename relative to it, and coverlet does not choose the same root for every run — one report says `Program.cs` where another says `QuotesApi/Program.cs`. Keying on the raw filename failed to merge them, so files landed in the totals twice: once with real coverage, once at zero. The first merged report read 29.96% and listed `EndpointExtensions.cs` twice at zero covered while the integration suite was demonstrably exercising every endpoint in it.
+
+Neither fix moves a goalpost. Both were the difference between measuring the code the tests are responsible for and measuring something else. The lesson generalises past this repository: **a metric nobody has verified is just a number**, and this one was wrong in two independent ways at once.
+
+Merged line coverage is **84.44%** — 803 of 951 lines across 30 files — against a gate of 80%. It was 40% under the broken filters, and 29.96% under the broken merge.
+
+What is still uncovered, and why each one is left rather than papered over:
+
+```
+missing  covered  total  file
+     82       38    120  OrderRefactor/Controllers/AuthController.cs
+     21        4     25  OrderRefactor/Repositories/OrderRepository.cs
+     14       38     52  QuotesApi/Controllers/CollectionsController.cs
+     14       14     28  QuotesApi/Repositories/CollectionRepository.cs
+      6       79     85  OrderRefactor/Program.cs
+      4        4      8  OrderRefactor/Controllers/OrderController.cs
+      3      124    127  QuotesApi/Program.cs
+      3       25     28  OrderRefactor/Authentication/IssuerSchemeSelector.cs
+      1       13     14  OrderRefactor/Data/OrdersDbContext.cs
+```
+
+**The surprise is the first row, and I do not have a satisfying explanation for it yet.** `AuthController` is the most heavily tested file in the repository by intent — `RefreshTokenTests` drives login, rotation, replay detection, family revocation and logout end to end through a real HTTP pipeline — and it comes out the *least* covered at 32%. The branches I know are untested are small: invalid credentials, an empty refresh token, an expired-but-not-revoked token. Those are perhaps fifteen lines, not eighty-two. Either coverlet is attributing lines to this file that the tests genuinely never execute, or there is more dead code in it than I think. Reading the per-line report to find out is the next thing I would do, and I would rather record the discrepancy than round it off.
+
+The other rows are ordinary. `OrderRepository` at 4/25 is exercised only through `OrderService`, which the unit tests substitute away — its real EF calls run in no test. `CollectionsController` and `CollectionRepository` keep the error branches that no test provokes. Both `Program.cs` files are near-total because the integration suites boot them; the handful of missing lines are startup paths that only run when configuration is absent.
+
+None of this is padding. Covering `OrderRepository` properly means an EF-backed test that writes and reads real rows, which is worth doing and is not the same as adding assertions until a percentage moves.
 
 ---
 
@@ -169,21 +221,37 @@ Three cards were conceptual rather than build tasks. Where each one landed in th
 
 ---
 
-## Two bugs these tests caught
+## Bugs these tests caught
 
 **A startup bug that would have broken any clean deployment.** All 23 integration tests failed on their first run — inside `Program.cs`, not in test code. `Quote.IsDeleted` existed on the model but had never been captured in a migration, so `Database.Migrate()` threw `PendingModelChangesWarning` against any fresh database. My local `quotes.db` predated the drift, so it had never surfaced in development. A clean clone would not have booted. Fixed in [`20260812113000_AddQuoteIsDeleted.cs`](QuotesApi/Migrations/20260812113000_AddQuoteIsDeleted.cs).
 
 **A regression I introduced myself, caught within the hour.** Adding `[Authorize(Policy = "AdminOnly")]` to `CreateOrder` immediately broke an existing Day 2 test that posted without a token — it started returning 401 before reaching the logic under test. The suite caught it the same hour I wrote it. I fixed the test, not the policy.
+
+**Every error response advertised the wrong media type.** `ExceptionHandlingMiddleware` set `Response.ContentType = "application/problem+json"` and then called `WriteAsJsonAsync`, which assigns `"application/json; charset=utf-8"` unconditionally and silently overwrote it. A client keying off `application/problem+json` would not have recognised a single one of these as a problem document. Invisible until a test asserted the header rather than the body.
+
+**A hardcoded exporter endpoint that only worked on one machine.** `Program.cs` shipped spans to a literal `http://localhost:4317`. In Azure that meant every span was exported into nothing — no error, no log line, the same silent shape as the App Insights connection-string bug on Day 5, sitting one layer beneath it. Under `dotnet test` the same literal was loud instead of silent: with no collector listening, every export waited out its timeout and every `WebApplicationFactory` disposal blocked on a final flush. The integration suite went from seconds to **41 minutes**. The endpoint now comes from configuration, and no configured endpoint means no exporter is registered.
+
+**The auth scheme router disagreed with the validator it routes to.** The policy-scheme lambda compared the token issuer against a hardcoded `"OrderRefactorIssuer"` while the validator read `ValidIssuer` from configuration. Renaming `Jwt:Issuer` would have routed every internally-issued token to the Entra validator, which would have rejected all of them. It also matched `"Bearer "` case-sensitively, against RFC 7235. Neither was reachable by test until the logic was pulled out of `Program.cs`.
+
+**The suite was passing because of a file on my laptop.** After `Jwt:Key` left `appsettings.json`, the tests kept going green — on my machine, via `dotnet user-secrets`. The moment the test host stopped running as `Development` for an unrelated reason, eleven tests failed at once. A fresh clone on a CI runner would have failed the same way the first time anyone else ran it. The key now arrives through the environment, the way production delivers it.
+
+**A test that asserted the old, broken behaviour.** `CreateQuote_EvenWithFakeClockOverridden_CreatedAtStillReflectsRealSystemTime` documented the `IClock` gap honestly, and was correct when written. Fixing the endpoint made it wrong, and it had been failing since — a red test that read like a known limitation. It is now two positive assertions, one of which reads the row back out of SQL Server to prove the injected instant was persisted rather than merely echoed.
 
 ---
 
 ## Running it
 
 ```bash
-dotnet test OrderRefactor.Tests        # 21
-dotnet test Quotes.Tests.Unit          # 97
-dotnet test Quotes.Tests.Integration   # 23 — requires Docker
+dotnet user-secrets set "Jwt:Key" "<32+ characters>" --project OrderRefactor   # once
+
+dotnet test OrderRefactor.Tests        # 41
+dotnet test Quotes.Tests.Unit          # 123
+dotnet test Quotes.Tests.Integration   # 43 — requires Docker
+
+./scripts/coverage.ps1                 # all three, merged, gated at 80%
 ```
+
+The user secret is needed only to `dotnet run` the API. The tests supply their own signing key through the environment, so a fresh clone tests green without any local setup.
 
 Local observability stack:
 
@@ -202,7 +270,7 @@ docker run -d -p 8080:8080 -v quotes-data:/data \
 curl http://localhost:8080/health   # Healthy
 ```
 
-**CI status.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs all three projects as separate jobs on GitHub Actions. All three `dotnet test` steps pass, including the integration job, which starts a real SQL Server 2022 container on the runner via Testcontainers. All three jobs then fail on a final *Enforce line coverage threshold* step: the gate is set to 70% and actual line coverage is 40%. The gate was introduced in `5cd551d` and this codebase has never met it. Raising coverage honestly means testing `CollectionRepository`, the endpoint handlers, and `ExceptionHandlingMiddleware` — not padding the number against `Original/OrderController.cs`, which exists in order to be bad. I would rather agree a threshold that reflects reality and ratchet it upward than write tests that move a percentage without adding confidence. [Latest run](../../actions).
+**CI status.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs the three test projects as a matrix on GitHub Actions, each uploading its Cobertura report, and a final `Coverage gate` job merges all three and enforces 80%. The integration leg starts a real SQL Server 2022 container on the runner via Testcontainers. [Latest run](../../actions).
 
 ---
 
@@ -231,3 +299,47 @@ The two required values pull in opposite directions: the count is an aggregate t
 **Why a CTE rather than a correlated subquery.** `EXPLAIN QUERY PLAN` shows the correlated version carrying a `CORRELATED SCALAR SUBQUERY` node with its own `SCAN q2` — the inner query depends on the outer row, so it re-scans and re-sorts once per author group. The CTE version has no `CORRELATED` node; it is nested co-routines pipelining from a single `SCAN Quotes`. Trade-off worth naming: the CTE version uses three `USE TEMP B-TREE` sorts against the correlated version's two, so it front-loads more sorting. On 23 rows neither is measurably slow — the CTE wins on how it scales, not on this dataset.
 
 Same shape as the Day 5 N+1: one query per collection turned a request into six sequential round trips. A correlated subquery is that pattern moved inside the database engine.
+
+Window functions and set operations are in the same folder: [`sql/WINDOW-FUNCTIONS.md`](sql/WINDOW-FUNCTIONS.md) covers `ROW_NUMBER`, `RANK`, `LAG` and a running total; [`sql/SET-OPERATIONS.md`](sql/SET-OPERATIONS.md) translates three business questions into `EXCEPT`, `INTERSECT` and `UNION`, with a note on why each operator was the right one.
+
+---
+
+## Day 8 — Execution plans and indexes
+
+[`sql/INDEXES.md`](sql/INDEXES.md) — a clustered and two non-clustered indexes over 100k generated rows, with `SET STATISTICS IO ON` logical-read counts before and after each one, and the write-side cost measured separately rather than asserted.
+
+[`sql/COVERING-INDEXES.md`](sql/COVERING-INDEXES.md) — a query doing a key lookup, an index with `INCLUDE`d columns that eliminates it, and both plans side by side.
+
+---
+
+## Day 9 — Transactions and isolation
+
+[`sql/DEADLOCK.md`](sql/DEADLOCK.md) — a two-resource deadlock reproduced across two sessions with opposite lock ordering, the deadlock graph, and the fix by consistent ordering.
+
+[`sql/ISOLATION-LEVELS.md`](sql/ISOLATION-LEVELS.md) — dirty read, non-repeatable read and phantom read each reproduced and then prevented, one isolation level at a time. Not on the assigned list; kept because the deadlock only makes sense next to it.
+
+---
+
+## Day 10 — EF Core internals
+
+[`Quotes.Benchmark/README.md`](Quotes.Benchmark/README.md) — change tracker versus `AsNoTracking` over 10k rows, measured with BenchmarkDotNet rather than a stopwatch, so the allocation numbers mean something. Includes the case where `AsNoTracking` is the wrong choice.
+
+[`Quotes.Benchmark/PROJECTIONS.md`](Quotes.Benchmark/PROJECTIONS.md) — the SQL EF generates for a whole-entity query, the leaner SQL after projecting to a DTO, and one accidental client-side evaluation caught and fixed.
+
+---
+
+## Day 11 — Performance
+
+[`perf/README.md`](perf/README.md) — a deliberately slow endpoint profiled under k6 load: p50/p99, the N+1 SQL it emits, and the execution plan.
+
+[`perf/FIX.md`](perf/FIX.md) — the same endpoint after eliminating the N+1 and indexing `Author`. **p99 down 241x** against a 10x target, with before and after plans. Two overclaims in the original write-up were corrected afterwards; the corrections are in the commit history rather than quietly edited out.
+
+---
+
+## Day 12 — CQRS and Dapper
+
+[`QuotesApi/Features/Collections/README.md`](QuotesApi/Features/Collections/README.md) — the Collections feature split into a write path through MediatR commands and the aggregate, and a read path projecting straight from the `DbContext` with `PreviewSize` pushed into SQL via a per-collection `ROW_NUMBER`.
+
+[`QuotesApi/Features/Collections/DAPPER.md`](QuotesApi/Features/Collections/DAPPER.md) — the same read path in hand-written SQL, timed against the EF version, with the rule I would give a teammate for when to drop to Dapper.
+
+Both implementations are held to the same contract by [`CollectionSummariesReadPathTests`](Quotes.Tests.Integration/CollectionSummariesReadPathTests.cs), which asserts they return identical results at four preview sizes, with an owner filter, for an empty collection, and when a previewed quote has been deleted underneath them. A faster query that answers a different question is not an optimisation.

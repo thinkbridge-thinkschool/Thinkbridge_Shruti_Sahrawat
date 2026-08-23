@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Shared coverage configuration for all three test projects.
+
+  Before this file existed the filters were passed as trailing RunSettings
+  arguments on each dotnet test line in CI, and two of them were wrong.
+
+  1. The exclude filter was written as [*.Migrations]* which matches an
+     ASSEMBLY named something.Migrations. No such assembly exists here. EF
+     Core's generated migrations, model snapshots and designer files live
+     inside the QuotesApi and OrderRefactor assemblies, so roughly 900 lines
+     of generated code were being counted as untested application code.
+
+  2. The include filter [OrderRefactor]* swept in the type
+     OrderRefactor.Original.OrderController, the 255 line god method kept
+     unmodified as the "before" half of the Day 1 refactor. It exists in
+     order to be bad. Testing it would be meaningless; counting it against
+     the gate is worse than meaningless.
+
+  Fixing those two filters is not moving the goalposts. It is measuring the
+  code the tests are actually responsible for.
+-->
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat code coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+
+          <!-- Only the two application assemblies. Test projects, xUnit,
+               EF Core and every other dependency are not our coverage. -->
+          <Include>[QuotesApi]*,[OrderRefactor]*</Include>
+
+          <Exclude>[OrderRefactor]OrderRefactor.Original.*,[*]*.Migrations.*</Exclude>
+
+          <!-- Belt and braces: the namespace filter above catches the
+               migration classes, this catches the designer and snapshot
+               files whatever namespace they are generated into. -->
+          <ExcludeByFile>**/Migrations/*.cs,**/Migrations/**/*.cs</ExcludeByFile>
+
+          <ExcludeByAttribute>GeneratedCodeAttribute,CompilerGeneratedAttribute,ExcludeFromCodeCoverageAttribute</ExcludeByAttribute>
+
+          <!-- Auto property getters and setters are compiler generated one
+               line accessors with no branch and no behaviour. Counting them
+               inflates the number on DTO heavy code without a single test
+               being written, which is the same distortion in the opposite
+               direction. -->
+          <SkipAutoProps>true</SkipAutoProps>
+
+          <UseSourceLink>false</UseSourceLink>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

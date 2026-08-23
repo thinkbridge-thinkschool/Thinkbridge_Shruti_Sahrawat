@@ -27,7 +27,9 @@ public class OrderControllerTests : IClassFixture<WebApplicationFactory<Program>
         _connection = new SqliteConnection("DataSource=:memory:");
         _connection.Open();
 
-        _jwtKey = "YourSuperSecretKeyThatIsAtLeast32BytesLong!";
+        // Same key the module initializer put in the environment for the host,
+        // so tokens minted here validate against tokens the host expects.
+        _jwtKey = TestJwt.Key;
 
         _factory = factory.WithWebHostBuilder(builder =>
         {

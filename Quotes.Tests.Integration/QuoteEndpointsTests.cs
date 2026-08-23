@@ -150,22 +150,44 @@ public class QuoteEndpointsTests
         problem!.Title.Should().Be("Quote not found");
     }
 
-    // Documents a real gap rather than papering over it: IClock is registered as an overridable
-    // singleton, but POST /api/quotes (EndpointExtensions.cs) calls the 2-arg
-    // Quote.Create(author, text) overload, never the 3-arg Quote.Create(author, text, clock)
-    // overload. The fake clock below is therefore never consulted on this request path, and
-    // CreatedAt always comes from the real system clock no matter what's registered in DI.
+    // This test used to assert the opposite, and was right to: IClock was registered
+    // and overridable, but POST /api/quotes called an overload that read
+    // DateTime.UtcNow directly, so the registration was decorative and the fake clock
+    // was never consulted. The endpoint now resolves IClock and hands its instant to
+    // Quote.Create, so overriding the clock in the test host changes what the endpoint
+    // writes - end to end, through the real DI graph, EF, and SQL Server.
+    //
+    // Asserting the exact instant rather than a tolerance window is the point. A test
+    // that says "close to now" would still pass if the clock were ignored again.
     [Fact]
-    public async Task CreateQuote_EvenWithFakeClockOverridden_CreatedAtStillReflectsRealSystemTime()
+    public async Task CreateQuote_WithClockOverridden_StampsCreatedAtFromTheInjectedClock()
     {
-        var fakeClock = new FixedClock(new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero));
-        using var host = await TestInfrastructure.CreateFreshHost(_sqlServer, fakeClock);
-        var beforeCreate = DateTime.UtcNow;
+        var instant = new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        using var host = await TestInfrastructure.CreateFreshHost(_sqlServer, new FixedClock(instant));
 
         var response = await host.Client.PostAsJsonAsync("/api/quotes", new CreateQuoteRequest { Author = "Ada Lovelace", Text = "A valid quote." });
 
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
         var body = await response.Content.ReadFromJsonAsync<QuoteResponse>(TestInfrastructure.Json);
-        body!.CreatedAt.Year.Should().NotBe(2000);
-        body.CreatedAt.Should().BeOnOrAfter(beforeCreate).And.BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
+        body!.CreatedAt.Should().Be(instant.UtcDateTime);
+    }
+
+    // The stored row, not just the response body. If CreatedAt were only being set on
+    // the way out, the assertion above would still pass and the database would hold
+    // the wrong value.
+    [Fact]
+    public async Task CreateQuote_WithClockOverridden_PersistsTheClockInstantAndReadsItBack()
+    {
+        var instant = new DateTimeOffset(1969, 7, 20, 20, 17, 0, TimeSpan.Zero);
+        using var host = await TestInfrastructure.CreateFreshHost(_sqlServer, new FixedClock(instant));
+
+        var created = await host.Client.PostAsJsonAsync("/api/quotes", new CreateQuoteRequest { Author = "Neil Armstrong", Text = "The Eagle has landed." });
+        var createdBody = await created.Content.ReadFromJsonAsync<QuoteResponse>(TestInfrastructure.Json);
+
+        var fetched = await host.Client.GetAsync($"/api/quotes/{createdBody!.Id}");
+
+        fetched.StatusCode.Should().Be(HttpStatusCode.OK);
+        var fetchedBody = await fetched.Content.ReadFromJsonAsync<QuoteResponse>(TestInfrastructure.Json);
+        fetchedBody!.CreatedAt.Should().Be(instant.UtcDateTime);
     }
 }

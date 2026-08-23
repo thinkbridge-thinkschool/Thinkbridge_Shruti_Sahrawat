@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8' />
+<title>CollectionSummaryBenchmarks-20260822-160303</title>
+
+<style type="text/css">
+	table { border-collapse: collapse; display: block; width: 100%; overflow: auto; }
+	td, th { padding: 6px 13px; border: 1px solid #ddd; text-align: right; }
+	tr { background-color: #fff; border-top: 1px solid #ccc; }
+	tr:nth-child(even) { background: #f8f8f8; }
+</style>
+</head>
+<body>
+<pre><code>
+BenchmarkDotNet v0.15.8, Windows 11 (10.0.26200.9168/25H2/2025Update/HudsonValley2)
+12th Gen Intel Core i5-1235U 1.30GHz, 1 CPU, 12 logical and 10 physical cores
+.NET SDK 10.0.302
+  [Host]     : .NET 10.0.10 (10.0.10, 10.0.1026.32716), X64 RyuJIT x86-64-v3
+  Job-AGBPQC : .NET 10.0.10 (10.0.10, 10.0.1026.32716), X64 RyuJIT x86-64-v3
+</code></pre>
+<pre><code>IterationCount=15  WarmupCount=3  
+</code></pre>
+
+<table>
+<thead><tr><th>Method   </th><th>Mean</th><th>Error</th><th>StdDev</th><th>Ratio</th><th>RatioSD</th><th>Gen0</th><th>Gen1</th><th>Allocated</th><th>Alloc Ratio</th>
+</tr>
+</thead><tbody><tr><td>EntityFramework</td><td>507.8 &mu;s</td><td>153.38 &mu;s</td><td>128.08 &mu;s</td><td>1.05</td><td>0.34</td><td>17.5781</td><td>1.9531</td><td>112.79 KB</td><td>1.00</td>
+</tr><tr><td>Dapper</td><td>223.9 &mu;s</td><td>6.92 &mu;s</td><td>5.78 &mu;s</td><td>0.46</td><td>0.10</td><td>11.7188</td><td>1.9531</td><td>73.57 KB</td><td>0.65</td>
+</tr></tbody></table>
+</body>
+</html>

@@ -8,7 +8,13 @@ public class Order
     public List<OrderItem> Items { get; set; } = new();
     public decimal Total { get; set; }
     public string Status { get; set; } = "Pending";
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    // No `= DateTime.UtcNow` default. A property initialiser that reads the
+    // ambient clock fires on every materialisation, including when EF rehydrates
+    // a row, and it silently overrides anything a test wants to pin. OrderService
+    // sets this from the injected IClock instead.
+    public DateTime CreatedAt { get; set; }
+
     public string? DiscountCode { get; set; }
 }
 

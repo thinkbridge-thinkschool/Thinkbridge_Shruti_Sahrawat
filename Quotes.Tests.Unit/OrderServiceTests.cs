@@ -10,6 +10,10 @@ namespace Quotes.Tests.Unit;
 
 public class OrderServiceTests
 {
+    // OrderService stamps Order.CreatedAt from the injected clock now, so the
+    // tests supply one instead of the service reaching for DateTime.UtcNow.
+    private static readonly OrderTestClock Clock = new();
+
     private static CreateOrderRequest SingleItemRequest(string email = "grace@example.com", string? discountCode = null) => new()
     {
         CustomerName = "Grace Hopper",
@@ -32,7 +36,7 @@ public class OrderServiceTests
         repository.GetCustomerByEmailAsync("grace@example.com", Arg.Any<CancellationToken>()).Returns(existingCustomer);
         repository.AddOrderAsync(Arg.Any<Order>(), Arg.Any<CancellationToken>()).Returns(callInfo => (Order)callInfo[0]);
         discountCalculator.GetDiscountPercent(Arg.Any<string?>(), Arg.Any<bool>()).Returns(0m);
-        var service = new OrderService(repository, discountCalculator, config, logger);
+        var service = new OrderService(repository, discountCalculator, config, logger, Clock);
 
         await service.CreateOrderAsync(SingleItemRequest(), CancellationToken.None);
 
@@ -59,7 +63,7 @@ public class OrderServiceTests
         });
         repository.AddOrderAsync(Arg.Any<Order>(), Arg.Any<CancellationToken>()).Returns(callInfo => (Order)callInfo[0]);
         discountCalculator.GetDiscountPercent(Arg.Any<string?>(), Arg.Any<bool>()).Returns(0m);
-        var service = new OrderService(repository, discountCalculator, config, logger);
+        var service = new OrderService(repository, discountCalculator, config, logger, Clock);
 
         await service.CreateOrderAsync(SingleItemRequest(email: "new@example.com"), CancellationToken.None);
 
@@ -80,7 +84,7 @@ public class OrderServiceTests
         repository.GetCustomerByEmailAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(customer);
         repository.AddOrderAsync(Arg.Any<Order>(), Arg.Any<CancellationToken>()).Returns(callInfo => (Order)callInfo[0]);
         discountCalculator.GetDiscountPercent(Arg.Any<string?>(), Arg.Any<bool>()).Returns(0m);
-        var service = new OrderService(repository, discountCalculator, config, logger);
+        var service = new OrderService(repository, discountCalculator, config, logger, Clock);
         var request = new CreateOrderRequest
         {
             CustomerName = "Grace Hopper",
@@ -108,7 +112,7 @@ public class OrderServiceTests
         repository.GetCustomerByEmailAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(customer);
         repository.AddOrderAsync(Arg.Any<Order>(), Arg.Any<CancellationToken>()).Returns(callInfo => (Order)callInfo[0]);
         discountCalculator.GetDiscountPercent("SAVE10", false).Returns(0.10m);
-        var service = new OrderService(repository, discountCalculator, config, logger);
+        var service = new OrderService(repository, discountCalculator, config, logger, Clock);
 
         var result = await service.CreateOrderAsync(SingleItemRequest(discountCode: "SAVE10"), CancellationToken.None);
 
@@ -127,7 +131,7 @@ public class OrderServiceTests
         repository.AddOrderAsync(Arg.Any<Order>(), Arg.Any<CancellationToken>()).Returns(callInfo => (Order)callInfo[0]);
         discountCalculator.GetDiscountPercent(Arg.Any<string?>(), Arg.Any<bool>()).Returns(0m);
         config["Orders:TaxRate"].Returns("0.10");
-        var service = new OrderService(repository, discountCalculator, config, logger);
+        var service = new OrderService(repository, discountCalculator, config, logger, Clock);
 
         var result = await service.CreateOrderAsync(SingleItemRequest(), CancellationToken.None);
 
@@ -146,7 +150,7 @@ public class OrderServiceTests
         repository.AddOrderAsync(Arg.Any<Order>(), Arg.Any<CancellationToken>()).Returns(callInfo => (Order)callInfo[0]);
         discountCalculator.GetDiscountPercent(Arg.Any<string?>(), Arg.Any<bool>()).Returns(0m);
         config["Orders:TaxRate"].Returns((string?)null);
-        var service = new OrderService(repository, discountCalculator, config, logger);
+        var service = new OrderService(repository, discountCalculator, config, logger, Clock);
 
         var result = await service.CreateOrderAsync(SingleItemRequest(), CancellationToken.None);
 
@@ -165,7 +169,7 @@ public class OrderServiceTests
         repository.AddOrderAsync(Arg.Any<Order>(), Arg.Any<CancellationToken>()).Returns(callInfo => (Order)callInfo[0]);
         discountCalculator.GetDiscountPercent(Arg.Any<string?>(), Arg.Any<bool>()).Returns(0m);
         config["Orders:TaxRate"].Returns("not-a-number");
-        var service = new OrderService(repository, discountCalculator, config, logger);
+        var service = new OrderService(repository, discountCalculator, config, logger, Clock);
 
         var result = await service.CreateOrderAsync(SingleItemRequest(), CancellationToken.None);
 
@@ -183,7 +187,7 @@ public class OrderServiceTests
         repository.GetCustomerByEmailAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(customer);
         repository.AddOrderAsync(Arg.Any<Order>(), Arg.Any<CancellationToken>()).Returns(callInfo => (Order)callInfo[0]);
         discountCalculator.GetDiscountPercent(Arg.Any<string?>(), Arg.Any<bool>()).Returns(0m);
-        var service = new OrderService(repository, discountCalculator, config, logger);
+        var service = new OrderService(repository, discountCalculator, config, logger, Clock);
 
         var result = await service.CreateOrderAsync(SingleItemRequest(), CancellationToken.None);
 
@@ -201,7 +205,7 @@ public class OrderServiceTests
         repository.GetCustomerByEmailAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(customer);
         repository.AddOrderAsync(Arg.Any<Order>(), Arg.Any<CancellationToken>()).Returns(callInfo => (Order)callInfo[0]);
         discountCalculator.GetDiscountPercent(Arg.Any<string?>(), Arg.Any<bool>()).Returns(0m);
-        var service = new OrderService(repository, discountCalculator, config, logger);
+        var service = new OrderService(repository, discountCalculator, config, logger, Clock);
 
         var result = await service.CreateOrderAsync(SingleItemRequest(), CancellationToken.None);
 
@@ -219,7 +223,7 @@ public class OrderServiceTests
         repository.GetCustomerByEmailAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(customer);
         repository.AddOrderAsync(Arg.Any<Order>(), Arg.Any<CancellationToken>()).Returns(callInfo => (Order)callInfo[0]);
         discountCalculator.GetDiscountPercent(Arg.Any<string?>(), Arg.Any<bool>()).Returns(0m);
-        var service = new OrderService(repository, discountCalculator, config, logger);
+        var service = new OrderService(repository, discountCalculator, config, logger, Clock);
 
         var result = await service.CreateOrderAsync(SingleItemRequest(), CancellationToken.None);
 
@@ -238,7 +242,7 @@ public class OrderServiceTests
         repository.GetCustomerByEmailAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(customer);
         repository.AddOrderAsync(Arg.Any<Order>(), Arg.Any<CancellationToken>()).Returns(callInfo => (Order)callInfo[0]);
         discountCalculator.GetDiscountPercent(Arg.Any<string?>(), Arg.Any<bool>()).Returns(0m);
-        var service = new OrderService(repository, discountCalculator, config, logger);
+        var service = new OrderService(repository, discountCalculator, config, logger, Clock);
         var request = new CreateOrderRequest
         {
             CustomerName = "Grace Hopper",

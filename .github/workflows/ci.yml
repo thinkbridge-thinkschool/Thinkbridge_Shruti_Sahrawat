@@ -5,138 +5,107 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  DOTNET_VERSION: '10.0.x'
+  DOTNET_NOLOGO: 'true'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
+  COVERAGE_THRESHOLD: '80'
+
 jobs:
-  order-refactor-tests:
-    name: OrderRefactor.Tests
+  # One leg per test project. fail-fast is off so a break in one suite still
+  # lets the other two report - knowing that only the integration tests broke
+  # is more useful than knowing that something broke.
+  test:
+    name: ${{ matrix.project }}
     runs-on: ubuntu-latest
-    env:
-      TEST_PROJECT: OrderRefactor.Tests/OrderRefactor.Tests.csproj
-      COVERAGE_THRESHOLD: "70"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-      - run: dotnet restore "$TEST_PROJECT"
-      - run: dotnet build "$TEST_PROJECT" --no-restore
-      - run: >
-          dotnet test "$TEST_PROJECT" --no-build
-          --logger "trx;LogFileName=test-results.trx"
-          --collect:"XPlat Code Coverage"
-          -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Include="[OrderRefactor]*"
-          DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude="[*.Tests]*,[*.Migrations]*"
-      - name: Upload test results and coverage
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results-order-refactor-tests
-          path: |
-            OrderRefactor.Tests/TestResults/**/*.trx
-            OrderRefactor.Tests/TestResults/**/coverage.cobertura.xml
-      - name: Enforce line coverage threshold
-        run: |
-          COVERAGE_FILE=$(find OrderRefactor.Tests/TestResults -name "coverage.cobertura.xml" | head -n 1)
-          if [ -z "$COVERAGE_FILE" ]; then
-            echo "::error::No coverage.cobertura.xml found"
-            exit 1
-          fi
-          COVERAGE_FILE="$COVERAGE_FILE" python3 <<'PYEOF'
-          import os, sys, xml.etree.ElementTree as ET
-          path = os.environ["COVERAGE_FILE"]
-          threshold = float(os.environ["COVERAGE_THRESHOLD"])
-          rate = float(ET.parse(path).getroot().get("line-rate")) * 100
-          print(f"Line coverage: {rate:.2f}% (threshold: {threshold}%)")
-          if rate < threshold:
-              print(f"::error::Line coverage {rate:.2f}% is below the {threshold}% threshold")
-              sys.exit(1)
-          PYEOF
+    strategy:
+      fail-fast: false
+      matrix:
+        project:
+          - OrderRefactor.Tests
+          - Quotes.Tests.Unit
+          - Quotes.Tests.Integration
 
-  quotes-tests-unit:
-    name: Quotes.Tests.Unit
-    runs-on: ubuntu-latest
-    env:
-      TEST_PROJECT: Quotes.Tests.Unit/Quotes.Tests.Unit.csproj
-      COVERAGE_THRESHOLD: "70"
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-      - run: dotnet restore "$TEST_PROJECT"
-      - run: dotnet build "$TEST_PROJECT" --no-restore
-      - run: >
-          dotnet test "$TEST_PROJECT" --no-build
-          --logger "trx;LogFileName=test-results.trx"
-          --collect:"XPlat Code Coverage"
-          -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Include="[QuotesApi]*"
-          DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude="[*.Tests]*,[*.Migrations]*"
-      - name: Upload test results and coverage
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results-quotes-tests-unit
-          path: |
-            Quotes.Tests.Unit/TestResults/**/*.trx
-            Quotes.Tests.Unit/TestResults/**/coverage.cobertura.xml
-      - name: Enforce line coverage threshold
-        run: |
-          COVERAGE_FILE=$(find Quotes.Tests.Unit/TestResults -name "coverage.cobertura.xml" | head -n 1)
-          if [ -z "$COVERAGE_FILE" ]; then
-            echo "::error::No coverage.cobertura.xml found"
-            exit 1
-          fi
-          COVERAGE_FILE="$COVERAGE_FILE" python3 <<'PYEOF'
-          import os, sys, xml.etree.ElementTree as ET
-          path = os.environ["COVERAGE_FILE"]
-          threshold = float(os.environ["COVERAGE_THRESHOLD"])
-          rate = float(ET.parse(path).getroot().get("line-rate")) * 100
-          print(f"Line coverage: {rate:.2f}% (threshold: {threshold}%)")
-          if rate < threshold:
-              print(f"::error::Line coverage {rate:.2f}% is below the {threshold}% threshold")
-              sys.exit(1)
-          PYEOF
 
-  quotes-tests-integration:
-    name: Quotes.Tests.Integration
-    runs-on: ubuntu-latest
-    env:
-      TEST_PROJECT: Quotes.Tests.Integration/Quotes.Tests.Integration.csproj
-      COVERAGE_THRESHOLD: "70"
-    steps:
-      - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
-      - run: dotnet restore "$TEST_PROJECT"
-      - run: dotnet build "$TEST_PROJECT" --no-restore
-      - run: >
-          dotnet test "$TEST_PROJECT" --no-build
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore ${{ matrix.project }}/${{ matrix.project }}.csproj
+
+      - name: Build
+        run: >
+          dotnet build ${{ matrix.project }}/${{ matrix.project }}.csproj
+          --no-restore --configuration Release
+
+      - name: Test
+        run: >
+          dotnet test ${{ matrix.project }}/${{ matrix.project }}.csproj
+          --no-build --configuration Release
           --logger "trx;LogFileName=test-results.trx"
           --collect:"XPlat Code Coverage"
-          -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Include="[QuotesApi]*"
-          DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude="[*.Tests]*,[*.Migrations]*"
+          --settings coverlet.runsettings
+          --results-directory ${{ matrix.project }}/TestResults
+
       - name: Upload test results and coverage
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-quotes-tests-integration
+          name: coverage-${{ matrix.project }}
           path: |
-            Quotes.Tests.Integration/TestResults/**/*.trx
-            Quotes.Tests.Integration/TestResults/**/coverage.cobertura.xml
-      - name: Enforce line coverage threshold
+            ${{ matrix.project }}/TestResults/**/*.trx
+            ${{ matrix.project }}/TestResults/**/coverage.cobertura.xml
+          if-no-files-found: error
+
+  # The gate runs once, on the union of all three reports. Gating each project
+  # separately asks the unit suite to cover Program.cs, which it never executes -
+  # a threshold no honest test can reach. See scripts/check-coverage.py.
+  coverage:
+    name: Coverage gate
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download coverage from every test project
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          path: coverage-artifacts
+
+      - name: Merge reports and enforce the threshold
         run: |
-          COVERAGE_FILE=$(find Quotes.Tests.Integration/TestResults -name "coverage.cobertura.xml" | head -n 1)
-          if [ -z "$COVERAGE_FILE" ]; then
-            echo "::error::No coverage.cobertura.xml found"
+          set -euo pipefail
+          mapfile -t reports < <(find coverage-artifacts -name 'coverage.cobertura.xml' | sort)
+          if [ ${#reports[@]} -eq 0 ]; then
+            echo "::error::No coverage reports were downloaded"
             exit 1
           fi
-          COVERAGE_FILE="$COVERAGE_FILE" python3 <<'PYEOF'
-          import os, sys, xml.etree.ElementTree as ET
-          path = os.environ["COVERAGE_FILE"]
-          threshold = float(os.environ["COVERAGE_THRESHOLD"])
-          rate = float(ET.parse(path).getroot().get("line-rate")) * 100
-          print(f"Line coverage: {rate:.2f}% (threshold: {threshold}%)")
-          if rate < threshold:
-              print(f"::error::Line coverage {rate:.2f}% is below the {threshold}% threshold")
-              sys.exit(1)
-          PYEOF
+          printf 'Found %d report(s):\n' "${#reports[@]}"
+          printf '  %s\n' "${reports[@]}"
+          echo
+          python3 scripts/check-coverage.py "$COVERAGE_THRESHOLD" "${reports[@]}" \
+            | tee coverage-summary.txt
+
+      - name: Publish the summary on the run page
+        if: always()
+        run: |
+          {
+            echo '## Coverage'
+            echo
+            echo '```'
+            cat coverage-summary.txt 2>/dev/null || echo 'No summary produced.'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the merged summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-summary
+          path: coverage-summary.txt
+          if-no-files-found: warn
