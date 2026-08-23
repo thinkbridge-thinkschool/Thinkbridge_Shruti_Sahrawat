@@ -37,3 +37,7 @@ test-output*.txt
 # local test and coverage captures
 coverage-run.txt
 order-tests.txt
+
+# Entra app-registration request bodies
+scope.json
+preauth.json
