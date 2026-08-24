@@ -1,1 +1,92 @@
-/* You can add global styles to this file, and also import other style files */
+/*
+ * Design tokens, shared by every component via `var(--…)`.
+ *
+ * One system-wide instead of the light/dark pairs each component used to
+ * hardcode: `color-scheme: light dark` here is also what tells the browser's
+ * own UI (scrollbars, form controls) which palette is in play. `--bg` gets
+ * an explicit value and is set on <body> in this file — a page with no
+ * background color set is transparent, which is exactly how the old dark
+ * mode went unreadable: text turned light, the page underneath stayed
+ * whatever the browser chrome happened to be, and nothing composited.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #f7f4fb;
+  --surface: #ffffff;
+  --surface-sunken: #f1ecf9;
+  --ink: #1b1725;
+  --ink-soft: #4a4358;
+  --muted: #6e6780;
+  --rule: #e5e0ee;
+  --rule-strong: #cfc7de;
+  --accent: #5b3fa8;
+  --accent-soft: rgba(91, 63, 168, 0.08);
+  --accent-strong: #4a3389;
+  --bad: #a83a28;
+  --bad-soft: rgba(168, 58, 40, 0.08);
+
+  --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-quote: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+  --font-mono: ui-monospace, 'Cascadia Code', monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16131f;
+    --surface: #1e1a2a;
+    --surface-sunken: #211d30;
+    --ink: #ece8f4;
+    --ink-soft: #c0b9d0;
+    --muted: #9d95b3;
+    --rule: #322c44;
+    --rule-strong: #453d5e;
+    --accent: #a992e8;
+    --accent-soft: rgba(169, 146, 232, 0.14);
+    --accent-strong: #c3b0f0;
+    --bad: #e0897a;
+    --bad-soft: rgba(224, 137, 122, 0.12);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-ui);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/*
+ * Visually hidden but present for assistive tech — used on the skeleton
+ * loading states, whose `role="status"` needs actual text content for a
+ * screen reader to announce, even though sighted users read the shimmering
+ * placeholder shape instead of a sentence.
+ */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

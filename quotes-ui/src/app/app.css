@@ -1,0 +1,30 @@
+/*
+ * The layout shell. Two panes below ~64rem width stack — list, then detail —
+ * same as before. Above it, the detail pane moves to a sticky right column
+ * so selecting a quote doesn't require scrolling past the whole list to see
+ * what got selected.
+ *
+ * The breakpoint is on the shell, not on either child component: neither
+ * QuotesList nor QuoteDetail needs to know it has a sibling, let alone where
+ * the other one sits on screen.
+ */
+
+.shell {
+  display: grid;
+  gap: 2rem;
+  max-width: 74rem;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 4rem;
+}
+
+@media (min-width: 64rem) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr) 22rem;
+    align-items: start;
+  }
+
+  .shell > app-quote-detail {
+    position: sticky;
+    top: 2rem;
+  }
+}

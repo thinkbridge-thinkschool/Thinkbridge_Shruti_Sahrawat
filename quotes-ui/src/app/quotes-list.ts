@@ -59,7 +59,12 @@ type ViewState = 'loading' | 'error' | 'no-data' | 'no-matches' | 'ready';
 
     @switch (state()) {
       @case ('loading') {
-        <p class="state" role="status">Loading quotes…</p>
+        <ul class="skeleton-list" role="status">
+          <span class="visually-hidden">Loading quotes…</span>
+          @for (_ of skeletonRows(); track $index) {
+            <li class="skeleton-row"></li>
+          }
+        </ul>
       }
 
       @case ('error') {
@@ -104,7 +109,7 @@ type ViewState = 'loading' | 'error' | 'no-data' | 'no-matches' | 'ready';
       }
 
       @case ('ready') {
-        <ul class="quotes">
+        <ul class="quotes" (keydown)="onListKeydown($event)">
           <!-- track q.id, not $index. Tracking the index would make Angular
                reuse the DOM node at position 0 for whatever quote lands there
                next, so paging would mutate existing rows rather than replace
@@ -240,6 +245,14 @@ export class QuotesList {
   readonly totalPages = computed(() => Math.max(1, Math.ceil(this.totalCount() / this.size())));
 
   /**
+   * Purely cosmetic: how many skeleton bars to draw while `quotes.isLoading()`
+   * is true. Capped so a page size of 100 doesn't render a hundred empty
+   * rows — the point is to suggest "a list is coming," not to preview its
+   * exact length, which the skeleton can't know yet anyway.
+   */
+  readonly skeletonRows = computed(() => Array.from({ length: Math.min(this.size(), 6) }));
+
+  /**
    * Whether the request failed at the HTTP layer or never got that far.
    * Different causes, different things for the reader to go and check.
    */
@@ -310,6 +323,28 @@ export class QuotesList {
    */
   selectQuote(id: number): void {
     this.api.selectQuote(this.selectedId() === id ? null : id);
+  }
+
+  /**
+   * ArrowUp/ArrowDown move keyboard focus between rows without selecting
+   * them — the same division of labour as a native <select>: arrows move
+   * you, Enter/Space (native <button> behaviour, free) commits. Moving
+   * focus only, rather than also calling selectQuote(), avoids firing a
+   * fetch on every arrow press when someone is just scanning the list.
+   */
+  onListKeydown(event: KeyboardEvent): void {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+
+    const rows = Array.from(
+      (event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('.quote-row'),
+    );
+    if (rows.length === 0) return;
+
+    event.preventDefault();
+    const currentIndex = rows.indexOf(document.activeElement as HTMLButtonElement);
+    const delta = event.key === 'ArrowDown' ? 1 : -1;
+    const nextIndex = Math.min(rows.length - 1, Math.max(0, currentIndex + delta));
+    rows[nextIndex]?.focus();
   }
 
   firstPage(): void {

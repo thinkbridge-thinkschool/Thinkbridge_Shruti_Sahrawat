@@ -22,7 +22,9 @@ import { QuotesApi } from './quotes-api';
       }
 
       @case ('loading') {
-        <p class="state" role="status">Loading quote…</p>
+        <div class="skeleton-card" role="status">
+          <span class="visually-hidden">Loading quote…</span>
+        </div>
       }
 
       @case ('error') {

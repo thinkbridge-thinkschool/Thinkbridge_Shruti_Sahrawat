@@ -53,6 +53,38 @@ to the API — the right trade for a front-end exercise.
 
 ---
 
+## Layout and visual design
+
+Design tokens live in `src/styles.css` — colour, both faces, `color-scheme: light
+dark`. The previous version set light-mode colours per component and only
+*overrode text colour* under `prefers-color-scheme: dark`, never a background:
+correct-looking in a light browser, unreadable in a dark one, because nothing
+ever painted a dark surface under the now-light text. One `--bg` token, set on
+`body`, fixes it globally instead of once per component.
+
+`app.ts` owns the page-level layout (`app.css`'s `.shell` grid) rather than
+either child component knowing where it sits: below ~64rem the detail pane
+stacks under the list as before, above it the pane becomes a sticky right
+column, so selecting a quote doesn't mean scrolling back up past however many
+rows are on the page to see what got selected.
+
+Two type faces from Google Fonts, loaded in `index.html`: Source Serif 4 for
+the quoted text itself, Inter for everything the UI says about it (labels,
+buttons, meta). One thing this cost: Angular's production build fetches and
+inlines Google Fonts CSS at build time by default, which hangs indefinitely
+with no network reachable to `fonts.googleapis.com` — set
+`optimization.fonts.inline: false` in `angular.json` to fetch the stylesheet
+at runtime instead. Slightly slower first paint of styled text; a build that
+doesn't depend on outbound network access to finish.
+
+Arrow-key navigation between rows (`onListKeydown` in `quotes-list.ts`) moves
+*focus* only, not selection — the same division as a native `<select>`: arrows
+move you, Enter/Space (free, from using a real `<button>` per row) commits.
+Moving focus without also firing `selectQuote()` on every arrow press avoids a
+fetch per keystroke while scanning.
+
+---
+
 ## Three things worth knowing before reading the code
 
 **Zoneless is the default now.** There is no `provideZonelessChangeDetection()`
