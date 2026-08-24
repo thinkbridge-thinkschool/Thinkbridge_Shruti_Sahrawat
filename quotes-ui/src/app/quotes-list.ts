@@ -100,14 +100,24 @@ type ViewState = 'loading' | 'error' | 'no-data' | 'no-matches' | 'ready';
                them — visible as stale text flashing between pages, and as lost
                focus if a row ever holds an input. id is stable and unique. -->
           @for (q of visibleQuotes(); track q.id) {
-            <li>
-              <blockquote>{{ q.text }}</blockquote>
-              <footer>
-                <cite>{{ q.author }}</cite>
-                <time [attr.datetime]="q.createdAt">
-                  {{ q.createdAt | date: 'mediumDate' }}
-                </time>
-              </footer>
+            <li [class.selected]="q.id === selectedId()">
+              <!-- A <button>, not a click handler on the <li>, so the row is
+                   reachable by keyboard and gets the focus/activation
+                   semantics for free instead of hand-rolling role="button"
+                   and a keydown handler for Enter/Space. -->
+              <button
+                type="button"
+                class="quote-row"
+                [attr.aria-pressed]="q.id === selectedId()"
+                (click)="selectQuote(q.id)">
+                <blockquote>{{ q.text }}</blockquote>
+                <footer>
+                  <cite>{{ q.author }}</cite>
+                  <time [attr.datetime]="q.createdAt">
+                    {{ q.createdAt | date: 'mediumDate' }}
+                  </time>
+                </footer>
+              </button>
             </li>
           } @empty {
             <!-- Unreachable: 'ready' is only reached when visibleQuotes() is
@@ -165,6 +175,17 @@ export class QuotesList {
 
   /** The resource itself: value(), isLoading(), error(), statusCode(). */
   readonly quotes = this.api.result;
+
+  /**
+   * Which row is selected for the detail pane, read straight from QuotesApi
+   * rather than owned here — QuoteDetail needs it too, and a second local
+   * signal would be one more place for the two to disagree. It reflects the
+   * id last *clicked*, not the id last *loaded*: deriving it from
+   * detailState() instead would blank the highlight for the duration of
+   * every fetch, since state() reports 'loading' rather than 'ready' while
+   * one is in flight.
+   */
+  readonly selectedId = this.api.selectedId;
 
   // ---- derived state --------------------------------------------------
 
@@ -263,6 +284,16 @@ export class QuotesList {
 
   clearFilter(): void {
     this.authorFilter.set('');
+  }
+
+  /**
+   * Toggle on second click of the same row, rather than only ever selecting.
+   * Without this there is no way to get back to QuoteDetail's 'idle' state
+   * once any row has been clicked, which is the kind of dead end a reviewer
+   * finds by trying to undo their own last action.
+   */
+  selectQuote(id: number): void {
+    this.api.selectQuote(this.selectedId() === id ? null : id);
   }
 
   firstPage(): void {

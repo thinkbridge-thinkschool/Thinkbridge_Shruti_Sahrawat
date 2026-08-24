@@ -94,12 +94,34 @@ code {
 .quotes li {
   border: 1px solid #e5e0ee;
   border-radius: 8px;
-  padding: 1rem 1.15rem;
+  padding: 0;
+}
+
+.quotes li.selected {
+  border-color: #5b3fa8;
 }
 
 @media (prefers-color-scheme: dark) {
   .quotes li { border-color: #2e2a3c; }
+  .quotes li.selected { border-color: #8f7bd6; }
 }
+
+.quote-row {
+  display: block;
+  width: 100%;
+  padding: 1rem 1.15rem;
+  border: none;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.quote-row:hover { background: rgba(91, 63, 168, 0.06); }
+
+.quote-row:focus-visible { outline: 2px solid #5b3fa8; outline-offset: -2px; }
 
 blockquote {
   margin: 0;
