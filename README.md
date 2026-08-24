@@ -1,14 +1,15 @@
 # Thinkbridge Backend Assignment — Shruti Sahrawat
 
-Days 1–13. All code in this repository. **207 tests passing** across three test projects, plus an Angular 21 front end in [`quotes-ui/`](quotes-ui).
+Days 1–13. All code in this repository. **207 .NET tests passing** across three test projects, plus an Angular 21 front end in [`quotes-ui/`](quotes-ui) with its own 6-test Vitest suite.
 
 | Suite | Tests | Runtime |
 |---|---|---|
 | `OrderRefactor.Tests` | 41 | ~5s |
 | `Quotes.Tests.Unit` | 123 | ~1s |
 | `Quotes.Tests.Integration` | 43 | ~2m37s, of which ~100s is Docker starting SQL Server 2022 |
+| `quotes-ui` (`npm test`) | 6 | ~1.3s |
 
-Coverage is gated once, on the union of all three suites — see [Day 4](#day-4--observability).
+Coverage is gated once, on the union of the three .NET suites — see [Day 4](#day-4--observability). `quotes-ui`'s suite is separate: a different runtime (Vitest, not xUnit) and not part of the 80% .NET gate.
 
 Two applications: **QuotesApi** (minimal API, DDD aggregate) and **OrderRefactor** (layered refactor, JWT auth, Entra ID).
 
@@ -382,3 +383,21 @@ API: with 10,000 rows and a page size of 100, filtering for an author who exists
 but is not on the current page reports no matches. Accurate about the page,
 misleading about the collection — a scope decision rather than an oversight,
 since the API exposes no author filter.
+
+**Piece 2 — a detail pane, and a bug piece 1's own pattern would have
+prevented.** [`quote-detail.ts`](quotes-ui/src/app/quote-detail.ts) reads
+`GET /api/quotes/{id}` for whichever row is clicked, from the brief in
+[`BRIEF-DETAIL.md`](quotes-ui/BRIEF-DETAIL.md). The first pass fetched it with
+a plain `HttpClient.get().subscribe()` instead of a second `httpResource`,
+which produced two real defects: a `catchError` that mapped every failure —
+including a real 404 for a quote deleted after the list loaded — to the same
+generic "not found," and no cancellation between one selection and the next,
+so selecting quote 1 then quickly quote 2 could show quote 1's late response
+overwriting quote 2 on screen. Neither was caught by clicking — there is no
+live Week-1 API in this environment — but both were caught by
+[`quotes-api.detail.spec.ts`](quotes-ui/src/app/quotes-api.detail.spec.ts),
+which controls the exact order two mocked responses arrive in. Fixed by
+replacing the subscription with `httpResource`, i.e. piece 1's own
+cancel-the-in-flight-request reasoning, applied to the piece that had skipped
+it. Full account, including the failing output from the draft and the passing
+output after the fix, in [`VERIFICATION.md`](quotes-ui/VERIFICATION.md).

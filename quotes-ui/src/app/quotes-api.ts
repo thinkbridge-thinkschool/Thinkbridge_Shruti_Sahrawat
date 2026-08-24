@@ -1,6 +1,5 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
-import { HttpClient, httpResource } from '@angular/common/http';
-import { catchError, of } from 'rxjs';
+import { Injectable, computed, signal } from '@angular/core';
+import { httpResource } from '@angular/common/http';
 import { DEFAULT_SIZE, DetailState, MIN_PAGE, PagedResult, Quote } from './quotes';
 
 /**
@@ -18,8 +17,6 @@ import { DEFAULT_SIZE, DetailState, MIN_PAGE, PagedResult, Quote } from './quote
  */
 @Injectable({ providedIn: 'root' })
 export class QuotesApi {
-  private readonly http = inject(HttpClient);
-
   /** Current page. Writable — the component drives it. */
   readonly page = signal(MIN_PAGE);
 
@@ -32,60 +29,60 @@ export class QuotesApi {
    * "an older response arrived after a newer one" race to reason about.
    */
   readonly result = httpResource<PagedResult<Quote>>(
-    () => `/api/quotes?page=${this.page()}&size=${this.size()}`
+    () => `/api/quotes?page=${this.page()}&size=${this.size()}`,
   );
 
   // ---- quote detail: GET /api/quotes/{id} ------------------------------
 
   /**
-   * Which id was last asked for — independent of whether it has loaded yet.
-   * QuotesList reads this to highlight the selected row immediately on
-   * click, rather than waiting for detailState() to reach 'ready' (which
-   * would make the highlight flicker off for the duration of the fetch).
+   * Which id is currently selected. `null` means nothing is — QuotesList
+   * drives this directly on row click, and QuoteDetail's request follows it.
    */
   readonly selectedId = signal<number | null>(null);
 
-  private readonly detailQuote = signal<Quote | null>(null);
-  private readonly detailLoading = signal(false);
-  private readonly detailFailed = signal(false);
+  /**
+   * Re-issues whenever selectedId() changes, same as `result` above — and
+   * for the same reason: the piece 2 draft fetched this by hand with
+   * `HttpClient.get().subscribe()`, which has no equivalent cancellation.
+   * Selecting quote 1 then quickly quote 2 left both requests in flight, and
+   * whichever one's response happened to arrive *last* is the one that won,
+   * regardless of which quote was actually still selected. httpResource
+   * aborts the superseded request itself; nothing here has to track "is this
+   * response for the selection I still care about" by hand.
+   *
+   * Guarded so that `selectedId() === null` issues no request at all, rather
+   * than fetching `/api/quotes/null` — `undefined` is httpResource's signal
+   * for "there is nothing to fetch right now."
+   */
+  private readonly detail = httpResource<Quote>(() => {
+    const id = this.selectedId();
+    return id === null ? undefined : `/api/quotes/${id}`;
+  });
 
   /**
    * The façade the component reads. Everything above this line is plumbing;
    * QuoteDetail only ever sees a `DetailState`, so how the fetch is actually
    * made — resource, subscription, whatever comes next — can change without
    * touching the component or the tests written against it.
+   *
+   * statusCode() flows through untouched on error, on purpose: it is what
+   * lets the draft's bug show up in a test at all. A `catchError` that maps
+   * every failure to the same `{ status: 'error' }` is indistinguishable
+   * from this one for a 500, and that is exactly the problem — a real 404
+   * (the quote was deleted after the list loaded) and an unreachable API
+   * need to stay tellable apart, the same distinction `failureKind` draws in
+   * QuotesList.
    */
   readonly detailState = computed<DetailState>(() => {
-    if (this.detailLoading()) return { status: 'loading' };
-    if (this.detailFailed()) return { status: 'error' };
-    const quote = this.detailQuote();
+    if (this.selectedId() === null) return { status: 'idle' };
+    if (this.detail.isLoading()) return { status: 'loading' };
+    if (this.detail.error()) return { status: 'error', statusCode: this.detail.statusCode() };
+    const quote = this.detail.value();
     return quote ? { status: 'ready', quote } : { status: 'idle' };
   });
 
   /** Called from the list when a row is clicked. `null` clears the detail pane. */
   selectQuote(id: number | null): void {
     this.selectedId.set(id);
-
-    if (id === null) {
-      this.detailQuote.set(null);
-      this.detailFailed.set(false);
-      this.detailLoading.set(false);
-      return;
-    }
-
-    this.detailLoading.set(true);
-    this.detailFailed.set(false);
-
-    this.http
-      .get<Quote>(`/api/quotes/${id}`)
-      .pipe(catchError(() => of(null)))
-      .subscribe(quote => {
-        this.detailLoading.set(false);
-        if (quote) {
-          this.detailQuote.set(quote);
-        } else {
-          this.detailFailed.set(true);
-        }
-      });
   }
 }

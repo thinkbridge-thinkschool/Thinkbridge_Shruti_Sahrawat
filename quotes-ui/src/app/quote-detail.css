@@ -3,13 +3,19 @@
   max-width: 46rem;
   margin: 0 auto 3rem;
   padding: 0 1.25rem;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
   color: #1b1725;
   line-height: 1.55;
 }
 
 @media (prefers-color-scheme: dark) {
-  :host { color: #ece8f4; }
+  :host {
+    color: #ece8f4;
+  }
 }
 
 .state {
@@ -20,7 +26,10 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  .state { border-color: #2e2a3c; color: #c0b9d0; }
+  .state {
+    border-color: #2e2a3c;
+    color: #c0b9d0;
+  }
 }
 
 .state.error {
@@ -52,6 +61,12 @@ article footer {
   color: #6e6780;
 }
 
-article cite { font-style: normal; font-weight: 600; }
+article cite {
+  font-style: normal;
+  font-weight: 600;
+}
 
-article .id { margin-left: auto; font-family: ui-monospace, "Cascadia Code", monospace; }
+article .id {
+  margin-left: auto;
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+}

@@ -84,6 +84,126 @@ renders as `loading` unless something forces it to become an error.
 
 ---
 
+## Piece 2 — quote detail (`GET /api/quotes/{id}`)
+
+### What I exercised
+
+There is no live Week-1 API in the environment this piece was built in, so
+"running it" meant something different here than for piece 1: a real
+`GET /api/quotes/{id}` against a mocked HTTP backend, driven by
+[`quotes-api.detail.spec.ts`](src/app/quotes-api.detail.spec.ts) and
+`HttpTestingController`, rather than clicking through a browser against the
+real dotnet process. What that buys over reading the diff: control over
+exactly *when* each mocked response resolves, which is what the race below
+needs and clicking cannot reliably force.
+
+| State / edge | How I forced it | What I saw |
+|---|---|---|
+| idle (nothing selected) | fresh service, no selection | `{ status: 'idle' }` |
+| loading | select a quote, check state before flushing | `{ status: 'loading' }` |
+| ready | select, flush a 200 with a real `Quote` body | `{ status: 'ready', quote }` |
+| cleared back to idle | select, load, then select `null` | `{ status: 'idle' }` |
+| error, with the status code preserved | select an id, flush a 404 `ProblemDetails` body | draft: `{ status: 'error' }` — no code. Fixed: `{ status: 'error', statusCode: 404 }` |
+| stale-response race | select 1, then select 2 before 1 resolves, flush 2 then 1 | draft: shows quote **1** — wrong. Fixed: shows quote **2** — right |
+
+### Two things the agent got wrong
+
+Both in the same first pass, both caught by the test above — not by reading
+the code and guessing, and not by clicking, since there was nothing running to
+click against.
+
+**One — a swallowed error.** The draft fetched the detail with
+`HttpClient.get(...).pipe(catchError(() => of(null))).subscribe(...)`. Every
+failure — a 404, a 500, a dropped connection — collapsed to the same `of(null)`
+and came out as `{ status: 'error' }` with no `statusCode`. Run against the
+draft, the 404 test failed exactly on that missing field:
+
+```
+AssertionError: expected { status: 'error' } to deeply equal { status: 'error', statusCode: 404 }
+- Expected
++ Received
+  {
+    "status": "error",
+-   "statusCode": 404,
+  }
+```
+
+A 404 here is not a hypothetical: `DELETE /api/quotes/{id}` exists in this API
+(Day 1, piece 2), so a row visible in a list that has not refetched can be
+gone by the time it is clicked. That is a different fact from "the API is
+down," and the draft told them apart from nothing.
+
+**Two — a stale-response race, the more interesting one.** The same
+subscription had no cancellation. Selecting quote 1 and then, before its
+response arrived, selecting quote 2, left both requests in flight with
+nothing tracking which one the current selection still cared about. Run
+against the draft with quote 2's response flushed first and quote 1's flushed
+second — the ordinary case where the first request simply took a slower
+path — the final state was quote 1:
+
+```
+AssertionError: expected { status: 'ready', …(1) } to deeply equal { status: 'ready', …(1) }
+- Expected
++ Received
+  {
+    "quote": {
+-     "author": "Author 2",
++     "author": "Author 1",
+-     "id": 2,
++     "id": 1,
+-     "text": "Quote text 2",
++     "text": "Quote text 1",
+      ...
+    },
+    "status": "ready",
+  }
+```
+
+The screen would have shown the *previous* selection, overwriting the one the
+user had already moved on to — silently, with no error and no loading
+indicator to suggest anything was wrong. This is the same shape of bug piece 1
+already had one instance of (`?? 0` inventing a fact about data that was
+merely late), but structural rather than a default: there was nothing in the
+draft's design that could tell "this response is for a selection I have since
+abandoned" from "this response is the one I am waiting for."
+
+**The fix.** Both were fixed together, in the same commit as the test that
+caught them, by replacing the subscription with a second `httpResource`:
+
+```ts
+private readonly detail = httpResource<Quote>(() => {
+  const id = this.selectedId();
+  return id === null ? undefined : `/api/quotes/${id}`;
+});
+```
+
+This is not a bigger fix bolted onto the same design — it is piece 1's own
+list resource, and piece 1's own reasoning ("cancelling the in-flight request
+first... no 'an older response arrived after a newer one' race to reason
+about") applied to the piece that skipped it. `httpResource` aborts the
+superseded request itself; `detailState` reads `error()` / `statusCode()`
+straight off the resource instead of through a `catchError` that discards the
+distinction. Re-run against the fix, all six cases pass, including the two
+that failed against the draft:
+
+```
+ ✓ src/app/quotes-api.detail.spec.ts (6 tests) 6 passed
+```
+
+### Why the same test file works against both
+
+`quotes-api.detail.spec.ts` never mentions `httpResource`, a subscription, or
+any other fetching mechanism — it only calls `selectQuote()` and reads
+`detailState()`. That façade is what let one test file run unchanged against
+the draft (catching both bugs) and then against the fix (confirming both were
+gone), rather than needing to be rewritten once the internals changed. The
+`respond()` helper checks `request.cancelled` before flushing for the same
+reason: the fixed implementation cancels the superseded request outright,
+which a test written only against the draft's always-flushable requests would
+not have anticipated.
+
+---
+
 ## One thing that is arguable rather than wrong
 
 The author filter searches only the page already fetched. With 10,000 quotes and
@@ -135,6 +255,16 @@ believes a number the server disagreed with.
 that can go stale without telling anyone. The honest fix is for the API to
 report its own limits — return the effective `size` in the response (it already
 does) and read that back rather than assuming the request was honoured.
+
+**Piece 2 — the detail endpoint's 404 losing its shape.** `detailState`'s error
+branch reads `this.detail.statusCode()` only — it never looks at the response
+body. That is deliberate: a `ProblemDetails` shape (`title`/`status`/`detail`)
+is exactly the kind of thing a later change swaps for a plain string or a
+different casing, and the UI already only promises "the API responded with
+HTTP {{ code }}," not the server's wording. The status code is the one part
+of a 404 this screen actually depends on, and it comes from the transport
+(`HttpErrorResponse.status`), not from parsing the body — so a body-shape
+change here is invisible to this component by design, not by luck.
 
 ---
 

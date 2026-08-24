@@ -1,4 +1,12 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, linkedSignal, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  linkedSignal,
+  signal,
+} from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { MAX_SIZE, MIN_PAGE, MIN_SIZE, Quote } from './quotes';
 import { QuotesApi } from './quotes-api';
@@ -32,7 +40,8 @@ type ViewState = 'loading' | 'error' | 'no-data' | 'no-matches' | 'ready';
           name="author"
           placeholder="e.g. Ada"
           [value]="authorFilter()"
-          (input)="onFilter($any($event.target).value)" />
+          (input)="onFilter($any($event.target).value)"
+        />
       </label>
 
       <label>
@@ -43,7 +52,8 @@ type ViewState = 'loading' | 'error' | 'no-data' | 'no-matches' | 'ready';
           [min]="1"
           [max]="100"
           [value]="size()"
-          (input)="onSize($any($event.target).value)" />
+          (input)="onSize($any($event.target).value)"
+        />
       </label>
     </form>
 
@@ -65,8 +75,8 @@ type ViewState = 'loading' | 'error' | 'no-data' | 'no-matches' | 'ready';
                at all means it was never asked. -->
           <p class="detail">
             @if (failureKind() === 'unreachable') {
-              No response from the API. Is it running, and is the dev-server
-              proxy pointed at the right port?
+              No response from the API. Is it running, and is the dev-server proxy pointed at the
+              right port?
             } @else {
               The API responded with HTTP {{ quotes.statusCode() }}.
             }
@@ -86,8 +96,9 @@ type ViewState = 'loading' | 'error' | 'no-data' | 'no-matches' | 'ready';
 
       @case ('no-matches') {
         <p class="state">
-          {{ totalOnPage() }} quotes on this page, none by an author matching
-          “{{ authorFilter() }}”.
+          {{ totalOnPage() }} quotes on this page, none by an author matching “{{
+            authorFilter()
+          }}”.
           <button type="button" (click)="clearFilter()">Clear filter</button>
         </p>
       }
@@ -109,7 +120,8 @@ type ViewState = 'loading' | 'error' | 'no-data' | 'no-matches' | 'ready';
                 type="button"
                 class="quote-row"
                 [attr.aria-pressed]="q.id === selectedId()"
-                (click)="selectQuote(q.id)">
+                (click)="selectQuote(q.id)"
+              >
                 <blockquote>{{ q.text }}</blockquote>
                 <footer>
                   <cite>{{ q.author }}</cite>
@@ -140,7 +152,8 @@ type ViewState = 'loading' | 'error' | 'no-data' | 'no-matches' | 'ready';
       <button
         type="button"
         [disabled]="page() >= totalPages() || quotes.isLoading()"
-        (click)="nextPage()">
+        (click)="nextPage()"
+      >
         Next
       </button>
     </nav>
@@ -193,7 +206,7 @@ export class QuotesList {
   readonly visibleQuotes = computed<Quote[]>(() => {
     const items = this.quotes.value()?.items ?? [];
     const term = this.authorFilter().trim().toLowerCase();
-    return term ? items.filter(q => q.author.toLowerCase().includes(term)) : items;
+    return term ? items.filter((q) => q.author.toLowerCase().includes(term)) : items;
   });
 
   /**
@@ -224,16 +237,14 @@ export class QuotesList {
   readonly totalOnPage = computed(() => this.quotes.value()?.items.length ?? 0);
 
   /** Also derived from two signals: totalCount and the page size. */
-  readonly totalPages = computed(() =>
-    Math.max(1, Math.ceil(this.totalCount() / this.size()))
-  );
+  readonly totalPages = computed(() => Math.max(1, Math.ceil(this.totalCount() / this.size())));
 
   /**
    * Whether the request failed at the HTTP layer or never got that far.
    * Different causes, different things for the reader to go and check.
    */
   readonly failureKind = computed<'unreachable' | 'http'>(() =>
-    this.quotes.statusCode() === undefined ? 'unreachable' : 'http'
+    this.quotes.statusCode() === undefined ? 'unreachable' : 'http',
   );
 
   /**
@@ -259,9 +270,14 @@ export class QuotesList {
     // you get a loop that is hard to see and harder to debug.
     effect(() => {
       // eslint-disable-next-line no-console
-      console.log('[quotes] state=%s page=%d size=%d shown=%d total=%d',
-        this.state(), this.page(), this.size(),
-        this.visibleQuotes().length, this.totalCount());
+      console.log(
+        '[quotes] state=%s page=%d size=%d shown=%d total=%d',
+        this.state(),
+        this.page(),
+        this.size(),
+        this.visibleQuotes().length,
+        this.totalCount(),
+      );
     });
   }
 
@@ -301,10 +317,10 @@ export class QuotesList {
   }
 
   prevPage(): void {
-    this.page.update(p => Math.max(MIN_PAGE, p - 1));
+    this.page.update((p) => Math.max(MIN_PAGE, p - 1));
   }
 
   nextPage(): void {
-    this.page.update(p => Math.min(this.totalPages(), p + 1));
+    this.page.update((p) => Math.min(this.totalPages(), p + 1));
   }
 }

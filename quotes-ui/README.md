@@ -1,7 +1,8 @@
 # quotes-ui
 
-An Angular 21 front end for the Week-1 Quotes API. One screen: a paged, filtered
-list of quotes read from `GET /api/quotes`.
+An Angular 21 front end for the Week-1 Quotes API. A paged, filtered list of
+quotes read from `GET /api/quotes`, with a detail pane below it that reads
+`GET /api/quotes/{id}` for whichever row was clicked.
 
 Standalone components, no `NgModule` anywhere, zoneless, and every piece of state
 is a signal.
@@ -39,12 +40,15 @@ to the API — the right trade for a front-end exercise.
 
 | File | What it holds |
 |---|---|
-| `src/app/quotes.ts` | The API contract, transcribed from `QuoteDtos.cs`. Types and the server's own limits. |
-| `src/app/quotes-api.ts` | `@Injectable` owning the query state (`page`, `size`) and the `httpResource`. |
-| `src/app/quotes-list.ts` | The screen. Filter state, derived values, and the template. |
+| `src/app/quotes.ts` | The API contract, transcribed from `QuoteDtos.cs`. Types, the `DetailState` union, and the server's own limits. |
+| `src/app/quotes-api.ts` | `@Injectable` owning the query state (`page`, `size`), the list `httpResource`, and the quote-detail `httpResource` behind a `detailState` façade. |
+| `src/app/quotes-list.ts` | The list screen. Filter state, derived values, row selection, and the template. |
+| `src/app/quote-detail.ts` | The detail pane for whichever row is selected. Reads one signal, `detailState()`, and nothing else. |
+| `src/app/quotes-api.detail.spec.ts` | The test that caught piece 2's two real bugs — see below. |
 | `src/app/request-timeout.ts` | Interceptor bounding how long a request may hang. |
 | `src/app/app.config.ts` | Providers. Note what is *absent* — see below. |
-| `BRIEF.md` | The prompt this was built from. |
+| `BRIEF.md` | The prompt piece 1 (the list) was built from. |
+| `BRIEF-DETAIL.md` | The prompt piece 2 (the detail pane) was built from. |
 | `VERIFICATION.md` | What was exercised, what came back wrong, what would break. |
 
 ---
@@ -73,9 +77,11 @@ not claim more than it knows.
 
 ---
 
-## Three bugs found by running it
+## Bugs found by running it
 
 Written up in full in [`VERIFICATION.md`](VERIFICATION.md).
+
+**Piece 1 — the list, three bugs, found by clicking:**
 
 1. **`status()` is not the HTTP status.** On `HttpResourceRef` it is the resource
    lifecycle (`'idle' | 'loading' | 'resolved' | 'error'`); the HTTP status is
@@ -90,16 +96,44 @@ Written up in full in [`VERIFICATION.md`](VERIFICATION.md).
    branch never ran. `loading`, `error` and `ready` are not exhaustive — *"never
    answered"* is a fourth state. Fixed with a timeout interceptor.
 
+**Piece 2 — the detail pane, two bugs, found by a test rather than by clicking**
+(there is no live Week-1 API in the environment this piece was verified in —
+see [`quotes-api.detail.spec.ts`](src/app/quotes-api.detail.spec.ts)):
+
+4. **A swallowed error.** The first pass fetched the detail with
+   `HttpClient.get().subscribe()` behind a `catchError` that mapped *every*
+   failure — a real 404 included — to the same generic "not found." A 404 (the
+   quote was deleted after the list loaded) and a dead API are different facts;
+   collapsing them lost the distinction `statusCode()` / `failureKind()` already
+   draws in the list.
+5. **A stale-response race.** The same subscription had no cancellation between
+   one selection and the next: click quote 1, then quickly quote 2, and
+   whichever response happened to *arrive* last — not whichever was *requested*
+   last — was what stayed on screen. Both fixed in the same commit as the test
+   that caught them, by replacing the subscription with a second `httpResource`
+   keyed on `selectedId`, which cancels the superseded request outright.
+
 ---
 
 ## Tests
 
-There are none, deliberately. `ng new` generated a spec asserting the scaffold's
-placeholder text, which this app no longer renders; it was deleted rather than
-edited to assert something else, because a test that only proves a component can
-be constructed proves very little.
+One spec, added for piece 2: [`quotes-api.detail.spec.ts`](src/app/quotes-api.detail.spec.ts).
+It exists because piece 1's three bugs were all caught by hand — reading the
+compiler's error, or clicking through the UI with the API stopped — and piece 2's
+two were not: a stale-response race depends on two requests resolving in a
+specific order, which is easy to miss by clicking and reliable to force with
+`HttpTestingController` controlling exactly when each one flushes.
 
-A spec worth writing would flush a fake response through
-`provideHttpClientTesting` and assert that `visibleQuotes` filters and that
-`state()` distinguishes `no-data` from `no-matches`. Not written here because
-Day 13 did not ask for it and an unverified test is worse than an absent one.
+Six cases against `QuotesApi.selectQuote()` / `detailState()`: idle with nothing
+selected, loading, ready, clearing the selection, a 404 carrying its status code,
+and the race — select 1, then 2, flush 2's response before 1's, and assert the
+screen still shows 2. Run with `npm test`.
+
+Piece 1's list screen still has no spec of its own, for the same reason as
+before: `ng new`'s generated spec asserted only the scaffold's placeholder text
+and was deleted rather than kept, and a spec worth writing there — flushing a
+fake page through `provideHttpClientTesting` to assert `visibleQuotes` filters
+and that `state()` distinguishes `no-data` from `no-matches` — was not asked for
+on Day 13 piece 1. Piece 2 explicitly asked for verification against edge cases
+a live run in this environment could not reach, which is what makes it the
+exception rather than a change of policy.
