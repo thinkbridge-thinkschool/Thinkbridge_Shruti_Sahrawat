@@ -152,6 +152,46 @@ the assistive tech has to be observing the node before the mutation. So
 asserts a hidden banner rather than an absent one. Counting that as a caught
 bug would be flattering the review; it is a design change made during it.
 
+## A fifth bug, found by running it rather than by the suite
+
+Every state above was verified through `HttpTestingController`, and every one
+of those tests passed. What they could not have caught: opening the actual
+running form showed the "hidden" banner and success regions as two empty,
+coloured, bordered boxes sitting under the submit button — not absent, not
+invisible, just empty.
+
+The cause is a CSS specificity tie the previous fix didn't anticipate.
+`.error` and `.success` each set `display: flex` for the state where they
+have content. The browser's own rule for a `hidden` attribute —
+`[hidden] { display: none }` — lives in the user-agent stylesheet at the same
+specificity, a single selector, as those class rules. A tie between an
+author rule and a user-agent rule is won by the author rule, so `display:
+flex` silently beat `display: none`, and "present but hidden" rendered as
+"present, empty, and visibly boxed" instead. `[hidden]` was doing exactly
+what it says on the tin — right up until an unrelated rule for the *other*
+state outranked it.
+
+Fixed by giving the hidden state its own, unambiguously higher-specificity
+selector rather than fighting the tie: `.error.banner[hidden]` and
+`.success[hidden]` in `quote-form.css`, both set to `display: none`
+explicitly.
+
+Worth being honest about what caught this and what didn't. `quote-form.spec.ts`
+now asserts `getComputedStyle(...).display === 'none'` on both regions in the
+pristine state — and that assertion does fail against the CSS this project
+shipped for the `.success` region. It does *not* fail for `.banner` against
+the same shipped CSS, because jsdom's handling of an author/user-agent
+specificity tie is not fully spec-accurate: it resolves one of the two
+identical bugs and not the other, for reasons internal to jsdom rather than
+to the bug itself. The screenshot of the running page is the more reliable
+witness here — both regions were visibly broken in the browser — and the
+test is worth keeping because it locks in the fix for the half jsdom can see,
+not because it is a complete substitute for looking at the rendered page.
+That gap between "jsdom passed" and "the browser was still wrong" is the same
+category of limitation `color-contrast` was already disabled for, just
+showing up on a property jsdom claims to support rather than one it plainly
+does not.
+
 ## What breaks if the quote contract changes
 
 **A field is renamed.** `author` → `authorName` on the request would be

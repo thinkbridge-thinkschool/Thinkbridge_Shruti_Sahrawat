@@ -115,6 +115,33 @@ textarea[aria-invalid='true']:focus-visible {
   gap: 0.6rem;
 }
 
+/*
+ * The banner and success regions are permanently in the DOM (quote-form.ts
+ * keeps them mounted and toggles [hidden] instead of *ngIf/@if, precisely so
+ * a screen reader is already watching the node before it gains text — see
+ * quote-form.ts). But a browser's built-in `[hidden] { display: none }` rule
+ * lives in the user-agent stylesheet at the SAME specificity (0,1,0) as the
+ * class selectors above, and an author stylesheet always wins a specificity
+ * tie against the UA sheet. `.error` and `.success` each set `display: flex`,
+ * so with the element hidden, "flex" beats "none" and an empty, otherwise
+ * unstyled bordered box is exactly what rendered here — a colored bar with
+ * nothing but its own left border in it. jsdom does not evaluate the CSS
+ * cascade the way a real browser paints it, so every test kept passing
+ * (`.hidden` was true the whole time) while the browser showed the box
+ * anyway. Caught by looking at the running page, not by the suite — the
+ * gap this project's own verification notes already flagged as a limit of
+ * jsdom.
+ *
+ * [hidden] plus a class needs the extra class in the selector to outrank a
+ * same-specificity display rule; !important would work too, but it invites
+ * exactly the fragile "whoever adds !important last wins" cascade this is
+ * trying to avoid.
+ */
+.error.banner[hidden],
+.success[hidden] {
+  display: none;
+}
+
 .actions {
   display: flex;
   gap: 0.75rem;

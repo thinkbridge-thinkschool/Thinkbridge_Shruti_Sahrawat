@@ -133,6 +133,31 @@ describe('QuoteForm — POST /api/quotes', () => {
     expect(textInput().getAttribute('aria-invalid')).toBeNull();
   });
 
+  it('actually hides the banner and success regions visually, not just via the DOM property', () => {
+    // The `.hidden` IDL property only says the `hidden` attribute is
+    // present — it says nothing about whether a stylesheet overrides the
+    // browser's own `[hidden] { display: none }` rule. `.error` and
+    // `.success` both set `display: flex` for when they *are* shown, at the
+    // same specificity as that rule, so an unqualified `[hidden]` loses the
+    // tie and the "hidden" box renders as an empty, bordered, coloured bar —
+    // which is exactly what showed up in the running app, on top of the fix
+    // this same commit made for the four bugs in VERIFICATION-FORM.md.
+    //
+    // Run against the CSS this project actually shipped for a few hours,
+    // this assertion caught the `.success` half (jsdom returned `flex`) but
+    // not the `.banner` half — jsdom's cascade tie-breaking between an
+    // author rule and a same-specificity UA rule is not fully spec-accurate,
+    // so it under-reproduces one of the two identical bugs rather than
+    // over-claiming a false positive. The screenshot that actually caught
+    // both is the more trustworthy source here; this test locks in the fix
+    // for whichever half jsdom can see, which is better than nothing but
+    // not a substitute for looking at the rendered page.
+    const banner = el.querySelector<HTMLElement>('.banner')!;
+    const success = el.querySelector<HTMLElement>('.success')!;
+    expect(getComputedStyle(banner).display).toBe('none');
+    expect(getComputedStyle(success).display).toBe('none');
+  });
+
   it('reports a required field as invalid once it has been touched', async () => {
     await type(authorInput(), 'x');
     await type(authorInput(), '');
