@@ -228,3 +228,11 @@ and the form shows nothing at all on a 400. This is the same silent-blank
 failure as finding one, and it is the reason the 400 branch is worth an
 integration test on the client rather than trust: the parse succeeds either
 way, and only an assertion about *rendered output* can tell the two apart.
+
+## Signal Forms preview vs. Reactive Forms
+
+Day 14 piece 2 asked for a short comparison against this same form, not a
+second one built in parallel — where the preview API is simpler, where it is
+still rough, and one over-claim worth checking rather than assuming. Written
+up in full, with sources, in
+[`SIGNAL-FORMS-VS-REACTIVE.md`](SIGNAL-FORMS-VS-REACTIVE.md).

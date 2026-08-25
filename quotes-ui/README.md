@@ -47,14 +47,15 @@ to the API — the right trade for a front-end exercise.
 | `src/app/quote-detail.ts` | The detail pane for whichever row is selected. Reads one signal, `detailState()`, and nothing else. |
 | `src/app/quotes-api.detail.spec.ts` | The test that caught Day 13 piece 2's two real bugs — see below. |
 | `src/app/quote-form.ts` | The create form. Signal Forms, per-field ARIA wiring, focus-first-error on failed submit. |
-| `src/app/quote-form.spec.ts` | 15 tests over the form's five states and its a11y contract, including axe. |
+| `src/app/quote-form.spec.ts` | 16 tests over the form's five states, its a11y contract, and the rendered hidden-region fix, including axe. |
 | `src/app/request-timeout.ts` | Interceptor bounding how long a request may hang. |
 | `src/app/app.config.ts` | Providers. Note what is *absent* — see below. |
 | `BRIEF.md` | The prompt Day 13 piece 1 (the list) was built from. |
 | `BRIEF-DETAIL.md` | The prompt Day 13 piece 2 (the detail pane) was built from. |
 | `BRIEF-FORM.md` | The prompt Day 14 piece 1 (the create form) was built from. |
 | `VERIFICATION.md` | Day 13: what was exercised, what came back wrong, what would break. |
-| `VERIFICATION-FORM.md` | Day 14: the same, for the form — states, a11y method, four caught bugs. |
+| `VERIFICATION-FORM.md` | Day 14: the same, for the form — states, a11y method, five caught bugs. |
+| `SIGNAL-FORMS-VS-REACTIVE.md` | Day 14 piece 2: Signal Forms preview against Reactive Forms — simpler, still rough, and one over-claim checked and rejected rather than assumed. |
 
 ---
 

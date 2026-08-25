@@ -466,3 +466,25 @@ reproduce that specificity tie the way a real browser does. Fixed with
 and a `getComputedStyle` regression test added afterward — one that,
 honestly, only catches half of the original bug in jsdom, which
 `VERIFICATION-FORM.md` says plainly rather than overclaiming.
+
+## Day 14, piece 2 — Signal Forms preview against Reactive Forms
+
+[`SIGNAL-FORMS-VS-REACTIVE.md`](quotes-ui/SIGNAL-FORMS-VS-REACTIVE.md) is the
+comparison this piece asked for, against the same real form above rather than
+a second component built in parallel. Simpler: no `FormBuilder`/`FormGroup`
+double declaration of the model's shape, one `[formField]` directive instead
+of `formControlName` plus a manual invalid-check, validators declared next to
+the field they constrain. Rougher, checked against the installed
+`@angular/forms/signals` package rather than assumed: async validation is
+Promise-based and newer, dynamic field groups go through plain signal arrays
+with a thinner set of real-world examples than `FormArray`, third-party
+`ControlValueAccessor` controls do not plug in natively, and the API is
+`@experimental` in the Angular version this project is pinned to — it did not
+reach stable until Angular 22.
+
+The over-claim worth naming: it would be easy to say Signal Forms'
+`required()` not trimming whitespace is a preview-API shortcoming Reactive
+Forms doesn't share. Read directly from both packages, `Validators.required`
+and `required()` use the same emptiness check, and neither trims. The
+whitespace bug fixed above is a gap the two APIs share, not one specific to
+the preview.
