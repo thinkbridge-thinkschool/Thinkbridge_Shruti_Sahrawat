@@ -453,3 +453,16 @@ the spec's fault rather than the component's.
 no live Week-1 API and no assistive tech in the environment this was built in,
 so what is proven is that the ARIA contract is correct, not that NVDA reads it
 as intended. `VERIFICATION-FORM.md` says so in those terms.
+
+**A fifth bug, found after submission by looking at the running page.** The
+banner and success regions are permanently in the DOM and only ever
+`[hidden]`, by design — but `.error` and `.success` in `quote-form.css` both
+set `display: flex`, at the exact same CSS specificity as the browser's own
+`[hidden] { display: none }` rule. That tie went to the stylesheet, not the
+browser, so the pristine form showed two empty, coloured, bordered boxes
+where nothing should render at all. No test caught it — jsdom does not
+reproduce that specificity tie the way a real browser does. Fixed with
+`.error.banner[hidden]` / `.success[hidden]`, both explicit `display: none`,
+and a `getComputedStyle` regression test added afterward — one that,
+honestly, only catches half of the original bug in jsdom, which
+`VERIFICATION-FORM.md` says plainly rather than overclaiming.

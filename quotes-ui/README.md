@@ -168,9 +168,18 @@ see [`quotes-api.detail.spec.ts`](src/app/quotes-api.detail.spec.ts)):
    on a wrapping `<div>`, where it is announced to nobody, and the form had
    no `novalidate` — so the browser's own bubble pre-empted the submit event
    and the error region, ARIA wiring and focus move never executed.
+10. **A fifth bug, found by running it rather than by the suite.** `.error`
+    and `.success` both set `display: flex` for their populated state, at
+    the same CSS specificity as the browser's own `[hidden] { display: none }`
+    rule — and that tie goes to the author stylesheet. So the "hidden"
+    banner and success regions rendered as two empty, bordered, coloured
+    boxes in the pristine form, passing every test while visibly wrong on
+    screen. Fixed with `.error.banner[hidden]` / `.success[hidden]`, both
+    explicit `display: none`.
 
-Full write-up, including a bug introduced *while* fixing these and the two
-red tests that turned out to be the spec's fault, in
+Full write-up, including a bug introduced *while* fixing these, the two
+red tests that turned out to be the spec's fault, and the fifth bug that
+no test caught until the page was actually opened, in
 [`VERIFICATION-FORM.md`](VERIFICATION-FORM.md).
 
 ---
@@ -189,17 +198,21 @@ selected, loading, ready, clearing the selection, a 404 carrying its status code
 and the race — select 1, then 2, flush 2's response before 1's, and assert the
 screen still shows 2.
 
-[`quote-form.spec.ts`](src/app/quote-form.spec.ts) adds fifteen more for Day 14:
+[`quote-form.spec.ts`](src/app/quote-form.spec.ts) adds sixteen more for Day 14:
 the form's five states (pristine, invalid, submitting, server-error, success),
 the contract edges (capitalised error keys, a 200-character author, a
-whitespace-only author), and the accessibility contract — label association,
+whitespace-only author), the accessibility contract — label association,
 `aria-invalid` and `aria-describedby` **on the control** rather than a wrapper,
 `novalidate`, focus landing on the first invalid field, and axe-core over the
-DOM in both the clean and the error-showing state.
+DOM in both the clean and the error-showing state — and one added after
+submission: a `getComputedStyle` check that the hidden banner/success regions
+actually render as `display: none`, not just that the `hidden` property is
+set. See bug 10 below.
 
-**21 tests, `npm test`.** The form spec is the interesting one to read: it was
-written against the brief before the component was reviewed, and the same file
-unchanged gives 8 failures against the draft and 21 passes against the fix.
+**22 tests, `npm test`.** The form spec is the interesting one to read: it was
+written against the brief before the component was reviewed, and the same
+fifteen-test version of the file, unchanged, gave 8 failures against the draft
+and 21 passes against the fix.
 
 Piece 1's list screen still has no spec of its own, for the same reason as
 before: `ng new`'s generated spec asserted only the scaffold's placeholder text
@@ -211,5 +224,5 @@ honest reason it is still open is scope rather than judgement.
 
 **These tests do not run in CI.** `.github/workflows/ci.yml` builds and tests
 the three .NET projects and gates coverage at 80%; `quotes-ui` is not in it. So
-21 green tests are a local check, not a build gate — worth knowing before
+22 green tests are a local check, not a build gate — worth knowing before
 treating them as protection against regression.
