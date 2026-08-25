@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { QuotesList } from './quotes-list';
 import { QuoteDetail } from './quote-detail';
+import { QuoteForm } from './quote-form';
 
 /**
  * Root component. Standalone, so it declares what it uses in `imports` and
@@ -12,13 +13,16 @@ import { QuoteDetail } from './quote-detail';
  */
 @Component({
   selector: 'app-root',
-  imports: [QuotesList, QuoteDetail],
+  imports: [QuotesList, QuoteDetail, QuoteForm],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styleUrl: './app.css',
   template: `
     <div class="shell">
       <app-quotes-list />
-      <app-quote-detail />
+      <div class="aside">
+        <app-quote-form />
+        <app-quote-detail />
+      </div>
     </div>
   `,
 })

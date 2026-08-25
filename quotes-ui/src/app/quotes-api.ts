@@ -1,6 +1,15 @@
-import { Injectable, computed, signal } from '@angular/core';
-import { httpResource } from '@angular/common/http';
-import { DEFAULT_SIZE, DetailState, MIN_PAGE, PagedResult, Quote } from './quotes';
+import { Injectable, computed, inject, signal } from '@angular/core';
+import { HttpClient, HttpErrorResponse, httpResource } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
+import {
+  CreateQuoteRequest,
+  CreateQuoteResult,
+  DEFAULT_SIZE,
+  DetailState,
+  MIN_PAGE,
+  PagedResult,
+  Quote,
+} from './quotes';
 
 /**
  * Owns the query against GET /api/quotes and the state that parameterises it.
@@ -84,5 +93,41 @@ export class QuotesApi {
   /** Called from the list when a row is clicked. `null` clears the detail pane. */
   selectQuote(id: number | null): void {
     this.selectedId.set(id);
+  }
+
+  // ---- create: POST /api/quotes ----------------------------------------
+
+  private readonly http = inject(HttpClient);
+
+  /**
+   * Posts a new quote and classifies the answer.
+   *
+   * A promise rather than a resource, because this is a command: it happens
+   * once, when the user asks, and it is not derived from any signal the way
+   * `result` and `detail` are. Signal Forms' `submit()` wants something
+   * awaitable anyway.
+   *
+   * Three outcomes rather than a thrown error, for the same reason the
+   * detail path has a DetailState: "the server rejected these fields" and
+   * "the server broke" and "nothing answered" need different words on
+   * screen, and an exception collapses them into one catch block.
+   */
+  async createQuote(request: CreateQuoteRequest): Promise<CreateQuoteResult> {
+    try {
+      const quote = await firstValueFrom(this.http.post<Quote>('/api/quotes', request));
+      return { outcome: 'created', quote };
+    } catch (error) {
+      if (error instanceof HttpErrorResponse && error.status === 400) {
+        const problem = error.error as { errors?: Record<string, string[]> } | null;
+        return { outcome: 'invalid', fieldErrors: problem?.errors ?? {} };
+      }
+      const statusCode = error instanceof HttpErrorResponse ? error.status : undefined;
+      return { outcome: 'failed', statusCode };
+    }
+  }
+
+  /** Refetches the current page — called after a successful create. */
+  reloadList(): void {
+    this.result.reload();
   }
 }

@@ -65,3 +65,46 @@ export type DetailState =
   | { status: 'loading' }
   | { status: 'error'; statusCode?: number }
   | { status: 'ready'; quote: Quote };
+
+// ---- POST /api/quotes ---------------------------------------------------
+
+/**
+ * Mirrors CreateQuoteRequest. Two fields, and only two.
+ *
+ * Note what is absent: no id (the server assigns it), no createdAt (the
+ * server stamps it from IClock), no title/tags/source. The response type
+ * `Quote` is deliberately *not* reused here — a request DTO and a response
+ * DTO that happen to overlap today are still two contracts, and typing the
+ * POST body as `Quote` would invite sending an `id` the endpoint ignores.
+ */
+export interface CreateQuoteRequest {
+  author: string;
+  text: string;
+}
+
+/**
+ * The server's own limits, from the data annotations on CreateQuoteRequest:
+ *
+ *   [Required, StringLength(200,  MinimumLength = 1)] Author
+ *   [Required, StringLength(1000, MinimumLength = 1)] Text
+ *
+ * StringLengthAttribute measures the raw string and does **not** trim, so
+ * these count untrimmed characters — the same thing the request body will
+ * carry. A client that validated `value.trim().length` would accept 200
+ * characters plus a trailing space and be 400'd by a server counting 201.
+ */
+export const AUTHOR_MAX_LENGTH = 200;
+export const TEXT_MAX_LENGTH = 1000;
+
+/**
+ * What a create attempt can come back as.
+ *
+ * `invalid` carries the server's own per-field messages rather than a
+ * flattened string: the endpoint returns ValidationProblemDetails with an
+ * `errors` dictionary, and those messages belong next to the field they are
+ * about, not in a heap at the top of the form.
+ */
+export type CreateQuoteResult =
+  | { outcome: 'created'; quote: Quote }
+  | { outcome: 'invalid'; fieldErrors: Record<string, string[]> }
+  | { outcome: 'failed'; statusCode?: number };
