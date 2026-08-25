@@ -1,13 +1,13 @@
 # Thinkbridge Backend Assignment — Shruti Sahrawat
 
-Days 1–13. All code in this repository. **207 .NET tests passing** across three test projects, plus an Angular 21 front end in [`quotes-ui/`](quotes-ui) with its own 6-test Vitest suite.
+Days 1–14. All code in this repository. **207 .NET tests passing** across three test projects, plus an Angular 21 front end in [`quotes-ui/`](quotes-ui) with its own 21-test Vitest suite.
 
 | Suite | Tests | Runtime |
 |---|---|---|
 | `OrderRefactor.Tests` | 41 | ~5s |
 | `Quotes.Tests.Unit` | 123 | ~1s |
 | `Quotes.Tests.Integration` | 43 | ~2m37s, of which ~100s is Docker starting SQL Server 2022 |
-| `quotes-ui` (`npm test`) | 6 | ~1.3s |
+| `quotes-ui` (`npm test`) | 21 | ~3s |
 
 Coverage is gated once, on the union of the three .NET suites — see [Day 4](#day-4--observability). `quotes-ui`'s suite is separate: a different runtime (Vitest, not xUnit) and not part of the 80% .NET gate.
 
@@ -401,3 +401,55 @@ replacing the subscription with `httpResource`, i.e. piece 1's own
 cancel-the-in-flight-request reasoning, applied to the piece that had skipped
 it. Full account, including the failing output from the draft and the passing
 output after the fix, in [`VERIFICATION.md`](quotes-ui/VERIFICATION.md).
+
+---
+
+## Day 14 — Reactive forms and accessibility
+
+[`quotes-ui/quote-form.ts`](quotes-ui/src/app/quote-form.ts) — a create-a-quote
+form against `POST /api/quotes`, built with **Signal Forms**
+(`@angular/forms/signals`, preview in Angular 21) rather than
+`ReactiveFormsModule`: the field tree is signals, like everything else on this
+screen.
+
+Same three artefacts as Day 13: [`BRIEF-FORM.md`](quotes-ui/BRIEF-FORM.md) is
+the prompt, [`quote-form.ts`](quotes-ui/src/app/quote-form.ts) is what came
+back, and [`VERIFICATION-FORM.md`](quotes-ui/VERIFICATION-FORM.md) is what
+happened when it was run.
+
+Accessibility is the actual exercise, not a checklist at the end: `<label for>`
+on every control, `aria-invalid` and `aria-describedby` **on the control
+itself**, live regions that exist before they have content, and focus moved to
+the first invalid field on a failed submit.
+
+**Four bugs, caught by a spec written against the brief and run at the draft.**
+The same file unchanged gives **8 failures against the draft and 21 passes
+against the fix**.
+
+The one worth the space is the contract bug. This API returns validation
+errors as `errors: { "Author": [...] }` — capitalised — while every other
+field it serialises is camelCase, because the keys are C# property names in a
+`Dictionary` and ASP.NET Core camel-cases property names but not dictionary
+keys. That is checked behaviour, not a reading of the docs:
+[`QuoteEndpointsTests.cs`](Quotes.Tests.Integration/QuoteEndpointsTests.cs)
+asserts `problem.Errors.Should().ContainKey("Author")` against real SQL Server.
+A form reading `errors.author` parses that 400 cleanly, throws nothing, logs
+nothing, and renders no errors at all — indistinguishable from success until
+you notice the quote was never created.
+
+The other three: an author capped at 100 where the API allows 200; whitespace
+passing `required()` on the client because Signal Forms' `isEmpty()` does not
+trim while `RequiredAttribute` does; and `aria-describedby` on a wrapping
+`<div>`, where it is announced to nobody, on a form with no `novalidate` — so
+the browser's native bubble pre-empted the submit event and none of the
+accessible error handling ran.
+
+The write-up also records a bug introduced *during* the fix — focus management
+that queried `[aria-invalid="true"]` from inside `onInvalid`, before change
+detection had written the attribute — and two red tests that turned out to be
+the spec's fault rather than the component's.
+
+**Verified by axe-core and DOM assertions, not by a screen reader.** There is
+no live Week-1 API and no assistive tech in the environment this was built in,
+so what is proven is that the ARIA contract is correct, not that NVDA reads it
+as intended. `VERIFICATION-FORM.md` says so in those terms.

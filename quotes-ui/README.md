@@ -1,8 +1,9 @@
 # quotes-ui
 
-An Angular 21 front end for the Week-1 Quotes API. A paged, filtered list of
-quotes read from `GET /api/quotes`, with a detail pane below it that reads
-`GET /api/quotes/{id}` for whichever row was clicked.
+An Angular 21 front end for the Week-1 Quotes API: a paged, filtered list of
+quotes from `GET /api/quotes`, a detail pane reading `GET /api/quotes/{id}`
+for whichever row was clicked, and a create form posting to
+`POST /api/quotes`.
 
 Standalone components, no `NgModule` anywhere, zoneless, and every piece of state
 is a signal.
@@ -44,12 +45,16 @@ to the API — the right trade for a front-end exercise.
 | `src/app/quotes-api.ts` | `@Injectable` owning the query state (`page`, `size`), the list `httpResource`, and the quote-detail `httpResource` behind a `detailState` façade. |
 | `src/app/quotes-list.ts` | The list screen. Filter state, derived values, row selection, and the template. |
 | `src/app/quote-detail.ts` | The detail pane for whichever row is selected. Reads one signal, `detailState()`, and nothing else. |
-| `src/app/quotes-api.detail.spec.ts` | The test that caught piece 2's two real bugs — see below. |
+| `src/app/quotes-api.detail.spec.ts` | The test that caught Day 13 piece 2's two real bugs — see below. |
+| `src/app/quote-form.ts` | The create form. Signal Forms, per-field ARIA wiring, focus-first-error on failed submit. |
+| `src/app/quote-form.spec.ts` | 15 tests over the form's five states and its a11y contract, including axe. |
 | `src/app/request-timeout.ts` | Interceptor bounding how long a request may hang. |
 | `src/app/app.config.ts` | Providers. Note what is *absent* — see below. |
-| `BRIEF.md` | The prompt piece 1 (the list) was built from. |
-| `BRIEF-DETAIL.md` | The prompt piece 2 (the detail pane) was built from. |
-| `VERIFICATION.md` | What was exercised, what came back wrong, what would break. |
+| `BRIEF.md` | The prompt Day 13 piece 1 (the list) was built from. |
+| `BRIEF-DETAIL.md` | The prompt Day 13 piece 2 (the detail pane) was built from. |
+| `BRIEF-FORM.md` | The prompt Day 14 piece 1 (the create form) was built from. |
+| `VERIFICATION.md` | Day 13: what was exercised, what came back wrong, what would break. |
+| `VERIFICATION-FORM.md` | Day 14: the same, for the form — states, a11y method, four caught bugs. |
 
 ---
 
@@ -145,6 +150,29 @@ see [`quotes-api.detail.spec.ts`](src/app/quotes-api.detail.spec.ts)):
    that caught them, by replacing the subscription with a second `httpResource`
    keyed on `selectedId`, which cancels the superseded request outright.
 
+**Day 14 — the create form, four bugs, found by a spec run against the draft:**
+
+6. **Server validation errors keyed in the wrong case.** The API returns
+   `errors: { "Author": [...] }` — capitalised, unlike every other field it
+   serialises — because the keys are C# property names in a dictionary, and
+   ASP.NET Core camel-cases property names but not dictionary keys. A client
+   reading `errors.author` parses the 400 without error and renders nothing,
+   which is indistinguishable from success until the list fails to refresh.
+7. **A validator stricter than the API.** Author capped at 100 where
+   `[StringLength(200)]` allows 200 — the form refusing input the server
+   would have taken, with no way for the user to find out why.
+8. **Whitespace passing the client and 400-ing at the server.** Signal Forms'
+   `required()` uses `isEmpty()`, which does not trim; `RequiredAttribute`
+   does. `"   "` was valid here and invalid there.
+9. **The accessible error path not running at all.** `aria-describedby` sat
+   on a wrapping `<div>`, where it is announced to nobody, and the form had
+   no `novalidate` — so the browser's own bubble pre-empted the submit event
+   and the error region, ARIA wiring and focus move never executed.
+
+Full write-up, including a bug introduced *while* fixing these and the two
+red tests that turned out to be the spec's fault, in
+[`VERIFICATION-FORM.md`](VERIFICATION-FORM.md).
+
 ---
 
 ## Tests
@@ -159,13 +187,29 @@ specific order, which is easy to miss by clicking and reliable to force with
 Six cases against `QuotesApi.selectQuote()` / `detailState()`: idle with nothing
 selected, loading, ready, clearing the selection, a 404 carrying its status code,
 and the race — select 1, then 2, flush 2's response before 1's, and assert the
-screen still shows 2. Run with `npm test`.
+screen still shows 2.
+
+[`quote-form.spec.ts`](src/app/quote-form.spec.ts) adds fifteen more for Day 14:
+the form's five states (pristine, invalid, submitting, server-error, success),
+the contract edges (capitalised error keys, a 200-character author, a
+whitespace-only author), and the accessibility contract — label association,
+`aria-invalid` and `aria-describedby` **on the control** rather than a wrapper,
+`novalidate`, focus landing on the first invalid field, and axe-core over the
+DOM in both the clean and the error-showing state.
+
+**21 tests, `npm test`.** The form spec is the interesting one to read: it was
+written against the brief before the component was reviewed, and the same file
+unchanged gives 8 failures against the draft and 21 passes against the fix.
 
 Piece 1's list screen still has no spec of its own, for the same reason as
 before: `ng new`'s generated spec asserted only the scaffold's placeholder text
 and was deleted rather than kept, and a spec worth writing there — flushing a
 fake page through `provideHttpClientTesting` to assert `visibleQuotes` filters
 and that `state()` distinguishes `no-data` from `no-matches` — was not asked for
-on Day 13 piece 1. Piece 2 explicitly asked for verification against edge cases
-a live run in this environment could not reach, which is what makes it the
-exception rather than a change of policy.
+on Day 13 piece 1. That gap is now the oldest untested thing here, and the
+honest reason it is still open is scope rather than judgement.
+
+**These tests do not run in CI.** `.github/workflows/ci.yml` builds and tests
+the three .NET projects and gates coverage at 80%; `quotes-ui` is not in it. So
+21 green tests are a local check, not a build gate — worth knowing before
+treating them as protection against regression.
