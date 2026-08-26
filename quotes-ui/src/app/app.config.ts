@@ -1,6 +1,9 @@
 import { ApplicationConfig, provideBrowserGlobalErrorListeners } from '@angular/core';
 import { provideHttpClient, withFetch, withInterceptors } from '@angular/common/http';
+import { authHeaderInterceptor } from './auth-header';
+import { errorMappingInterceptor } from './error-mapping';
 import { requestTimeoutInterceptor } from './request-timeout';
+import { retryWithBackoffInterceptor } from './retry-backoff';
 
 /**
  * Note what is absent: provideZonelessChangeDetection().
@@ -26,10 +29,30 @@ export const appConfig: ApplicationConfig = {
     // deliberate about in a zoneless app: XHR was one of the things zone.js
     // used to patch, and fetch is the modern path httpResource is built for.
     //
-    // The timeout interceptor bounds how long a request may hang. Without it a
-    // request that never settles leaves the UI on "Loading…" forever, which is
-    // exactly what happened when the dev proxy refused a connection and then
-    // never answered. See request-timeout.ts.
-    provideHttpClient(withFetch(), withInterceptors([requestTimeoutInterceptor])),
+    // Order matters here — each interceptor wraps everything after it, so
+    // this list reads outside-in for the request and inside-out for the
+    // response:
+    //
+    //   authHeaderInterceptor    — outermost: attaches a header, nothing else.
+    //   errorMappingInterceptor  — sees the *final* error, after retries are
+    //                              exhausted, so it maps once, not per attempt.
+    //   retryWithBackoffInterceptor — wraps every individual attempt below it,
+    //                              including the timeout on each one.
+    //   requestTimeoutInterceptor — innermost: bounds a single attempt, not
+    //                              the whole retried sequence.
+    //
+    // Swapping retry and errorMapping would mean errorMapping runs on every
+    // attempt instead of once at the end, and would need to unwrap its own
+    // AppError back into something retry's status check understands — worth
+    // writing down since the order is load-bearing, not stylistic.
+    provideHttpClient(
+      withFetch(),
+      withInterceptors([
+        authHeaderInterceptor,
+        errorMappingInterceptor,
+        retryWithBackoffInterceptor,
+        requestTimeoutInterceptor,
+      ]),
+    ),
   ],
 };

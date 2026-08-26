@@ -1,7 +1,8 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import axe from 'axe-core';
+import { errorMappingInterceptor } from './error-mapping';
 import { QuoteForm } from './quote-form';
 import { AUTHOR_MAX_LENGTH, TEXT_MAX_LENGTH } from './quotes';
 
@@ -30,6 +31,14 @@ import { AUTHOR_MAX_LENGTH, TEXT_MAX_LENGTH } from './quotes';
  * There is no live Week-1 API in this environment and no screen reader, so
  * a11y is verified two ways instead: axe-core over the rendered DOM, and
  * direct assertions on the attributes a screen reader would consume.
+ *
+ * `errorMappingInterceptor` is wired in here — not just left to its own
+ * `error-mapping.spec.ts` — because `QuotesApi.createQuote` now depends on
+ * it running: it opts the POST into `MAP_ERRORS` and classifies the
+ * `AppError` the interceptor throws, not a raw `HttpErrorResponse`. Testing
+ * this component without the interceptor its production `app.config.ts`
+ * always runs alongside would pass against a shape the real app never
+ * produces.
  */
 describe('QuoteForm — POST /api/quotes', () => {
   let fixture: ComponentFixture<QuoteForm>;
@@ -45,7 +54,10 @@ describe('QuoteForm — POST /api/quotes', () => {
 
   beforeEach(async () => {
     TestBed.configureTestingModule({
-      providers: [provideHttpClient(), provideHttpClientTesting()],
+      providers: [
+        provideHttpClient(withInterceptors([errorMappingInterceptor])),
+        provideHttpClientTesting(),
+      ],
     });
 
     fixture = TestBed.createComponent(QuoteForm);

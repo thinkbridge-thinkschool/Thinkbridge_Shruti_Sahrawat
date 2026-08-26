@@ -1,6 +1,7 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { HttpClient, HttpErrorResponse, httpResource } from '@angular/common/http';
+import { HttpClient, HttpContext, httpResource } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
+import { AppError, MAP_ERRORS } from './error-mapping';
 import {
   CreateQuoteRequest,
   CreateQuoteResult,
@@ -111,18 +112,30 @@ export class QuotesApi {
    * detail path has a DetailState: "the server rejected these fields" and
    * "the server broke" and "nothing answered" need different words on
    * screen, and an exception collapses them into one catch block.
+   *
+   * The by-hand `HttpErrorResponse` parsing this used to do lives in
+   * `errorMappingInterceptor` now — this call opts in with `MAP_ERRORS` and
+   * classifies the `AppError` it gets back instead. `GET /api/quotes` and
+   * `GET /api/quotes/{id}` deliberately do *not* opt in: `httpResource`'s
+   * own `statusCode()`/`error()` already are the typed-enough classification
+   * `QuotesList.failureKind` and `QuoteDetail`'s `DetailState` are built on,
+   * and rewriting the thrown shape under both would mean rewriting both to
+   * match — out of scope for what this endpoint needed.
    */
   async createQuote(request: CreateQuoteRequest): Promise<CreateQuoteResult> {
     try {
-      const quote = await firstValueFrom(this.http.post<Quote>('/api/quotes', request));
+      const quote = await firstValueFrom(
+        this.http.post<Quote>('/api/quotes', request, {
+          context: new HttpContext().set(MAP_ERRORS, true),
+        }),
+      );
       return { outcome: 'created', quote };
     } catch (error) {
-      if (error instanceof HttpErrorResponse && error.status === 400) {
-        const problem = error.error as { errors?: Record<string, string[]> } | null;
-        return { outcome: 'invalid', fieldErrors: problem?.errors ?? {} };
+      const appError = error as AppError;
+      if (appError.kind === 'validation') {
+        return { outcome: 'invalid', fieldErrors: appError.fieldErrors };
       }
-      const statusCode = error instanceof HttpErrorResponse ? error.status : undefined;
-      return { outcome: 'failed', statusCode };
+      return { outcome: 'failed', statusCode: appError.statusCode };
     }
   }
 
