@@ -49,13 +49,19 @@ to the API — the right trade for a front-end exercise.
 | `src/app/quote-form.ts` | The create form. Signal Forms, per-field ARIA wiring, focus-first-error on failed submit. |
 | `src/app/quote-form.spec.ts` | 16 tests over the form's five states, its a11y contract, and the rendered hidden-region fix, including axe. |
 | `src/app/request-timeout.ts` | Interceptor bounding how long a request may hang. |
-| `src/app/app.config.ts` | Providers. Note what is *absent* — see below. |
+| `src/app/api-contract.spec.ts` | Day 15's characterization test — pins the real API's shapes before any interceptor existed to consume them. |
+| `src/app/auth-header.ts` | Attaches `Authorization: Bearer <token>` to same-origin requests when `AuthTokenStore` has one. |
+| `src/app/error-mapping.ts` | Maps a failed response to a typed `AppError`, opt-in per request via the `MAP_ERRORS` context token. |
+| `src/app/retry-backoff.ts` | Retries a failed idempotent GET with increasing backoff; two real bugs caught in the same file — see `VERIFICATION-HTTP.md`. |
+| `src/app/app.config.ts` | Providers, including the ordered interceptor chain. Note what is *absent* — see below. |
 | `BRIEF.md` | The prompt Day 13 piece 1 (the list) was built from. |
 | `BRIEF-DETAIL.md` | The prompt Day 13 piece 2 (the detail pane) was built from. |
 | `BRIEF-FORM.md` | The prompt Day 14 piece 1 (the create form) was built from. |
+| `BRIEF-HTTP.md` | The prompt Day 15 (HttpClient + interceptors) was built from. |
 | `VERIFICATION.md` | Day 13: what was exercised, what came back wrong, what would break. |
 | `VERIFICATION-FORM.md` | Day 14: the same, for the form — states, a11y method, five caught bugs. |
 | `SIGNAL-FORMS-VS-REACTIVE.md` | Day 14 piece 2: Signal Forms preview against Reactive Forms — simpler, still rough, and one over-claim checked and rejected rather than assumed. |
+| `VERIFICATION-HTTP.md` | Day 15: the characterization test, the interceptors, and two real bugs caught in the same file — one visible in the diff, one only in a fake-timer test. |
 
 ---
 
@@ -183,6 +189,27 @@ red tests that turned out to be the spec's fault, and the fifth bug that
 no test caught until the page was actually opened, in
 [`VERIFICATION-FORM.md`](VERIFICATION-FORM.md).
 
+**Day 15 — HttpClient + interceptors, two bugs, both in `retry-backoff.ts`:**
+
+11. **Retried every method and every status.** The draft retried a failed
+    `POST` exactly like a failed `GET`, and a `400` exactly like a `503` —
+    no condition on either at all. A retried `POST` after a lost response
+    can create the quote twice; a retried `4xx` just resends a request the
+    server already rejected on purpose. Fixed: only `GET` is retried, and
+    only a network failure or a 5xx is treated as worth retrying.
+12. **The backoff delay callback had the wrong parameter order.** rxjs's
+    `retry({ delay })` calls `(error, retryCount)` — error first. The draft's
+    function took one parameter, so it silently received the
+    `HttpErrorResponse` as `retryCount`: `BASE_DELAY_MS * 2 ** (error - 1)`
+    is `NaN`, and a timer scheduled for `NaN` fires on the next tick. A
+    manual check — "did it retry?" — would have said yes; nothing about
+    reading the five-line function looked wrong. Caught only by a
+    fake-timer assertion that nothing had retried yet after 1ms.
+
+Full write-up, including the characterization test that pinned the real
+API's shapes before either interceptor existed, in
+[`VERIFICATION-HTTP.md`](VERIFICATION-HTTP.md).
+
 ---
 
 ## Tests
@@ -223,7 +250,18 @@ and that `state()` distinguishes `no-data` from `no-matches` — was not asked f
 on Day 13 piece 1. That gap is now the oldest untested thing here, and the
 honest reason it is still open is scope rather than judgement.
 
+Day 15 adds four more files: [`api-contract.spec.ts`](src/app/api-contract.spec.ts)
+(3 cases, the characterization test — green before `auth-header.ts`,
+`error-mapping.ts`, or `retry-backoff.ts` existed), [`auth-header.spec.ts`](src/app/auth-header.spec.ts)
+(4 cases, including that the token never reaches a cross-origin request),
+[`error-mapping.spec.ts`](src/app/error-mapping.spec.ts) (5 cases, one per
+`AppError` kind plus the unopted-in pass-through), and
+[`retry-backoff.spec.ts`](src/app/retry-backoff.spec.ts) (6 cases, using
+Vitest fake timers to make backoff timing exact rather than approximate —
+this is the file that caught both of Day 15's bugs).
+
 **These tests do not run in CI.** `.github/workflows/ci.yml` builds and tests
 the three .NET projects and gates coverage at 80%; `quotes-ui` is not in it. So
-22 green tests are a local check, not a build gate — worth knowing before
-treating them as protection against regression.
+40 green tests (22 from Days 13–14, 18 from Day 15) are a local check, not a
+build gate — worth knowing before treating them as protection against
+regression.
