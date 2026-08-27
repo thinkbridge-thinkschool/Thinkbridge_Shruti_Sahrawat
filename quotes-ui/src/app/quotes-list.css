@@ -146,16 +146,6 @@ code {
   transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
-/* Background tint + accent bar, not just a border-color swap — the previous
-   version was easy to miss at a glance, which matters here specifically
-   because the selected row is the only visible link to what the detail pane
-   (off to the side, or below on narrow screens) is currently showing. */
-.quotes li.selected {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  box-shadow: inset 3px 0 0 var(--accent);
-}
-
 .quote-row {
   display: block;
   width: 100%;
@@ -165,6 +155,7 @@ code {
   background: transparent;
   color: inherit;
   text-align: left;
+  text-decoration: none;
   font: inherit;
   cursor: pointer;
 }

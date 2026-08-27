@@ -46,25 +46,14 @@ export const MIN_SIZE = 1;
 export const MAX_SIZE = 100;
 export const DEFAULT_SIZE = 10;
 
-/**
- * The state a single-quote detail lookup can be in — GET /api/quotes/{id}.
- *
- * A discriminated union rather than a bag of optional fields on its own. The
- * component that renders this switches on `status` and TypeScript narrows the
- * rest: reading `.quote` outside the `'ready'` branch is a compile error, not
- * a `Quote | undefined` the template has to remember to guard every time.
- *
- * `statusCode` is optional even on `'error'` — a request that never reached a
- * server (proxy down, DNS failure) has no HTTP status at all, the same
- * `statusCode() === undefined` distinction QuotesList already draws in
- * `failureKind`. Collapsing that into a fake `0` would be the same mistake
- * `totalCount ?? 0` was on Day 13 piece 1.
- */
-export type DetailState =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'error'; statusCode?: number }
-  | { status: 'ready'; quote: Quote };
+// ---- GET /api/quotes/{id} -------------------------------------------------
+//
+// No shared DetailState type here as of Day 16 — the state a single-quote
+// lookup can be in now lives next to the one place that reads it,
+// QuoteDetail itself, since the fetch moved there too (route-driven, not
+// QuotesApi-driven; see quotes-api.ts). It also grew one more case than the
+// old union had: 'invalid', for a route :id that never should have reached
+// a fetch at all — see quote-id.ts.
 
 // ---- POST /api/quotes ---------------------------------------------------
 

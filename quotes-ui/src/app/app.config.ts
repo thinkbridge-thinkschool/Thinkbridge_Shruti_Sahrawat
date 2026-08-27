@@ -1,9 +1,11 @@
 import { ApplicationConfig, provideBrowserGlobalErrorListeners } from '@angular/core';
 import { provideHttpClient, withFetch, withInterceptors } from '@angular/common/http';
+import { provideRouter, withComponentInputBinding, withViewTransitions } from '@angular/router';
 import { authHeaderInterceptor } from './auth-header';
 import { errorMappingInterceptor } from './error-mapping';
 import { requestTimeoutInterceptor } from './request-timeout';
 import { retryWithBackoffInterceptor } from './retry-backoff';
+import { routes } from './app.routes';
 
 /**
  * Note what is absent: provideZonelessChangeDetection().
@@ -54,5 +56,22 @@ export const appConfig: ApplicationConfig = {
         requestTimeoutInterceptor,
       ]),
     ),
+
+    // withComponentInputBinding() binds a route's params (and query params,
+    // and data) directly onto a matching component input signal — QuoteDetail
+    // declares `id = input.required<string>()` and never touches
+    // ActivatedRoute itself. Without this, every routed component that wants
+    // its own route param goes back to injecting ActivatedRoute and
+    // subscribing by hand, the exact kind of manual subscription this app has
+    // spent Days 13-15 replacing with signals wherever an httpResource or a
+    // linkedSignal could do it declaratively instead.
+    //
+    // withViewTransitions() wraps every navigation in the browser's native
+    // View Transitions API when the browser supports one (Chromium; a no-op,
+    // not a break, elsewhere) — list -> detail, detail -> list, and list ->
+    // the create form all get it for free, rather than only the one
+    // list/detail pair hand-wired with document.startViewTransition() calls
+    // sprinkled through click handlers.
+    provideRouter(routes, withComponentInputBinding(), withViewTransitions()),
   ],
 };

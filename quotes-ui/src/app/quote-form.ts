@@ -7,11 +7,14 @@ import {
   signal,
 } from '@angular/core';
 import { FormField, form, maxLength, required, submit, validate } from '@angular/forms/signals';
+import { RouterLink } from '@angular/router';
 import { AUTHOR_MAX_LENGTH, Quote, TEXT_MAX_LENGTH } from './quotes';
 import { QuotesApi } from './quotes-api';
 
 /**
- * Create-a-quote form, posting to POST /api/quotes.
+ * Create-a-quote form, posting to POST /api/quotes. Routed at `quotes/new`,
+ * behind `authGuard` — see auth-guard.ts for why a route the real API
+ * doesn't itself require sign-in for is still guarded client-side.
  *
  * Signal Forms (`@angular/forms/signals`) rather than ReactiveFormsModule:
  * the field state is a signal tree, which is the same model the rest of this
@@ -19,7 +22,7 @@ import { QuotesApi } from './quotes-api';
  */
 @Component({
   selector: 'app-quote-form',
-  imports: [FormField],
+  imports: [FormField, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styleUrl: './quote-form.css',
   template: `
@@ -100,6 +103,7 @@ import { QuotesApi } from './quotes-api';
         @if (created(); as quote) {
           Added “{{ quote.text }}” — {{ quote.author }}.
           <button type="button" (click)="writeAnother()">Write another</button>
+          <a [routerLink]="['/quotes', quote.id]">View it</a>
         }
       </p>
     </form>

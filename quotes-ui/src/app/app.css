@@ -1,36 +1,13 @@
 /*
- * The layout shell. Two panes below ~64rem width stack — list, then detail —
- * same as before. Above it, the detail pane moves to a sticky right column
- * so selecting a quote doesn't require scrolling past the whole list to see
- * what got selected.
- *
- * The breakpoint is on the shell, not on either child component: neither
- * QuotesList nor QuoteDetail needs to know it has a sibling, let alone where
- * the other one sits on screen.
+ * The one layout wrapper every routed page renders inside. Replaces the old
+ * two-column `.shell`/`.aside` grid: with real routing, list and detail are
+ * separate pages now, not two panes of the same one, so there is nothing
+ * left to lay out side by side — just a consistent max-width and padding
+ * for whichever single page is currently active.
  */
 
-.shell {
-  display: grid;
-  gap: 2rem;
+.page {
   max-width: 74rem;
   margin: 0 auto;
   padding: 2.5rem 1.25rem 4rem;
-}
-
-.aside {
-  display: flex;
-  flex-direction: column;
-  gap: 2rem;
-}
-
-@media (min-width: 64rem) {
-  .shell {
-    grid-template-columns: minmax(0, 1fr) 22rem;
-    align-items: start;
-  }
-
-  .shell > .aside {
-    position: sticky;
-    top: 2rem;
-  }
 }

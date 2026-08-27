@@ -1,6 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { provideRouter } from '@angular/router';
 import axe from 'axe-core';
 import { errorMappingInterceptor } from './error-mapping';
 import { QuoteForm } from './quote-form';
@@ -57,6 +58,12 @@ describe('QuoteForm — POST /api/quotes', () => {
       providers: [
         provideHttpClient(withInterceptors([errorMappingInterceptor])),
         provideHttpClientTesting(),
+        // The template's new "View it" link (Day 16) is a routerLink, and
+        // RouterLink injects Router at construction — with no router
+        // provided at all this component would fail to even create, not
+        // just render the link inertly. Empty route table: nothing here
+        // actually navigates.
+        provideRouter([]),
       ],
     });
 

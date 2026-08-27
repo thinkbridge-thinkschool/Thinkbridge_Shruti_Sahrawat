@@ -8,6 +8,7 @@ import {
   signal,
 } from '@angular/core';
 import { DatePipe } from '@angular/common';
+import { RouterLink } from '@angular/router';
 import { MAX_SIZE, MIN_PAGE, MIN_SIZE, Quote } from './quotes';
 import { QuotesApi } from './quotes-api';
 
@@ -16,7 +17,7 @@ type ViewState = 'loading' | 'error' | 'no-data' | 'no-matches' | 'ready';
 
 @Component({
   selector: 'app-quotes-list',
-  imports: [DatePipe],
+  imports: [DatePipe, RouterLink],
   // Zoneless already means the framework only checks a component when one of
   // its signals changes, so OnPush is close to redundant here. It is set
   // explicitly anyway: it is a compile-time statement that this component has
@@ -116,17 +117,14 @@ type ViewState = 'loading' | 'error' | 'no-data' | 'no-matches' | 'ready';
                them — visible as stale text flashing between pages, and as lost
                focus if a row ever holds an input. id is stable and unique. -->
           @for (q of visibleQuotes(); track q.id) {
-            <li [class.selected]="q.id === selectedId()">
-              <!-- A <button>, not a click handler on the <li>, so the row is
-                   reachable by keyboard and gets the focus/activation
-                   semantics for free instead of hand-rolling role="button"
-                   and a keydown handler for Enter/Space. -->
-              <button
-                type="button"
-                class="quote-row"
-                [attr.aria-pressed]="q.id === selectedId()"
-                (click)="selectQuote(q.id)"
-              >
+            <li>
+              <!-- A real <a routerLink>, not a click handler on the <li>, so
+                   the row is reachable by keyboard and gets native link
+                   focus/activation semantics for free — and so a middle
+                   click or "open in new tab" on a row works the way it does
+                   on any other link, which a (click) handler alone cannot
+                   offer no matter how it's wired. -->
+              <a class="quote-row" [routerLink]="['/quotes', q.id]">
                 <blockquote>{{ q.text }}</blockquote>
                 <footer>
                   <cite>{{ q.author }}</cite>
@@ -134,7 +132,7 @@ type ViewState = 'loading' | 'error' | 'no-data' | 'no-matches' | 'ready';
                     {{ q.createdAt | date: 'mediumDate' }}
                   </time>
                 </footer>
-              </button>
+              </a>
             </li>
           } @empty {
             <!-- Unreachable: 'ready' is only reached when visibleQuotes() is
@@ -193,17 +191,6 @@ export class QuotesList {
 
   /** The resource itself: value(), isLoading(), error(), statusCode(). */
   readonly quotes = this.api.result;
-
-  /**
-   * Which row is selected for the detail pane, read straight from QuotesApi
-   * rather than owned here — QuoteDetail needs it too, and a second local
-   * signal would be one more place for the two to disagree. It reflects the
-   * id last *clicked*, not the id last *loaded*: deriving it from
-   * detailState() instead would blank the highlight for the duration of
-   * every fetch, since state() reports 'loading' rather than 'ready' while
-   * one is in flight.
-   */
-  readonly selectedId = this.api.selectedId;
 
   // ---- derived state --------------------------------------------------
 
@@ -316,32 +303,22 @@ export class QuotesList {
   }
 
   /**
-   * Toggle on second click of the same row, rather than only ever selecting.
-   * Without this there is no way to get back to QuoteDetail's 'idle' state
-   * once any row has been clicked, which is the kind of dead end a reviewer
-   * finds by trying to undo their own last action.
-   */
-  selectQuote(id: number): void {
-    this.api.selectQuote(this.selectedId() === id ? null : id);
-  }
-
-  /**
-   * ArrowUp/ArrowDown move keyboard focus between rows without selecting
-   * them — the same division of labour as a native <select>: arrows move
-   * you, Enter/Space (native <button> behaviour, free) commits. Moving
-   * focus only, rather than also calling selectQuote(), avoids firing a
-   * fetch on every arrow press when someone is just scanning the list.
+   * ArrowUp/ArrowDown move keyboard focus between rows without navigating —
+   * the same division of labour as a native <select>: arrows move you,
+   * Enter (native <a> behaviour, free) commits. Moving focus only, rather
+   * than also navigating, is what stops someone scanning the list with the
+   * arrow keys from firing a chunk load and a fetch on every keypress.
    */
   onListKeydown(event: KeyboardEvent): void {
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
 
     const rows = Array.from(
-      (event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('.quote-row'),
+      (event.currentTarget as HTMLElement).querySelectorAll<HTMLAnchorElement>('.quote-row'),
     );
     if (rows.length === 0) return;
 
     event.preventDefault();
-    const currentIndex = rows.indexOf(document.activeElement as HTMLButtonElement);
+    const currentIndex = rows.indexOf(document.activeElement as HTMLAnchorElement);
     const delta = event.key === 'ArrowDown' ? 1 : -1;
     const nextIndex = Math.min(rows.length - 1, Math.max(0, currentIndex + delta));
     rows[nextIndex]?.focus();

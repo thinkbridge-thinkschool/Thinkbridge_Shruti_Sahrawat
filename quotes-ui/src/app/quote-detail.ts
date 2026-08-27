@@ -1,26 +1,34 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import { DatePipe } from '@angular/common';
-import { QuotesApi } from './quotes-api';
+import { RouterLink } from '@angular/router';
+import { httpResource } from '@angular/common/http';
+import { Quote } from './quotes';
+
+/** The states GET /api/quotes/{id} can be in, for whichever :id is routed to. */
+type DetailPageState =
+  | { status: 'loading' }
+  | { status: 'error'; statusCode?: number }
+  | { status: 'ready'; quote: Quote };
 
 /**
- * The detail pane for whichever quote is currently selected in QuotesList.
+ * The detail page for one quote, routed at `quotes/:id`.
  *
- * Deliberately dumb: it reads one signal, `api.detailState()`, and switches
- * on its `status`. It does not know whether that state came from an
- * httpResource, a subscription, or a mock in a test — that is the point of
- * the façade on QuotesApi.
+ * `id` arrives as a component input, bound automatically from the route
+ * param by `withComponentInputBinding()` in app.config.ts — no
+ * `ActivatedRoute` injected here at all. A field initialiser is still an
+ * injection context (same fact `QuotesApi.result` relies on), which is what
+ * lets `httpResource` be created directly on this component instead of
+ * needing to live in a service the way `result` still does for the list.
  */
 @Component({
   selector: 'app-quote-detail',
-  imports: [DatePipe],
+  imports: [DatePipe, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styleUrl: './quote-detail.css',
   template: `
-    @switch (state().status) {
-      @case ('idle') {
-        <p class="state">Select a quote to see its detail.</p>
-      }
+    <a class="back" routerLink="/quotes">&larr; Back to quotes</a>
 
+    @switch (state().status) {
       @case ('loading') {
         <div class="skeleton-card" role="status">
           <span class="visually-hidden">Loading quote…</span>
@@ -39,10 +47,6 @@ import { QuotesApi } from './quotes-api';
       }
 
       @case ('ready') {
-        <!-- @if (...; as q) narrows Quote out of the DetailState union for
-             this block, the template equivalent of the status check in
-             quote()/statusCode() below - no non-null assertion needed here
-             either. -->
         @if (quote(); as q) {
           <article>
             <blockquote>{{ q.text }}</blockquote>
@@ -58,19 +62,19 @@ import { QuotesApi } from './quotes-api';
   `,
 })
 export class QuoteDetail {
-  private readonly api = inject(QuotesApi);
+  readonly id = input.required<string>();
 
-  readonly state = this.api.detailState;
+  private readonly quoteId = computed(() => Number(this.id()));
 
-  /**
-   * Narrows the DetailState union down to its Quote payload, or null.
-   *
-   * The `@switch` above already guarantees `status === 'ready'` when this is
-   * read from the template, but a `@switch` case doesn't narrow the type of
-   * a signal read elsewhere the way an `if` narrows a local in a .ts file —
-   * so the guard is written once here, with `@if (quote(); as q)` doing the
-   * rest in the template without a non-null assertion.
-   */
+  private readonly detail = httpResource<Quote>(() => `/api/quotes/${this.quoteId()}`);
+
+  readonly state = computed<DetailPageState>(() => {
+    if (this.detail.isLoading()) return { status: 'loading' };
+    if (this.detail.error()) return { status: 'error', statusCode: this.detail.statusCode() };
+    const quote = this.detail.value();
+    return quote ? { status: 'ready', quote } : { status: 'loading' };
+  });
+
   readonly quote = computed(() => {
     const s = this.state();
     return s.status === 'ready' ? s.quote : null;
