@@ -1,9 +1,10 @@
 # quotes-ui
 
 An Angular 21 front end for the Week-1 Quotes API: a paged, filtered list of
-quotes from `GET /api/quotes`, a detail pane reading `GET /api/quotes/{id}`
-for whichever row was clicked, and a create form posting to
-`POST /api/quotes`.
+quotes from `GET /api/quotes`, a detail page reading `GET /api/quotes/{id}`
+for whichever `:id` is routed to, and a create form posting to
+`POST /api/quotes`. Three real routes as of Day 16 — `quotes`, `quotes/new`,
+`quotes/:id` — not three panes of one page.
 
 Standalone components, no `NgModule` anywhere, zoneless, and every piece of state
 is a signal.
@@ -41,27 +42,33 @@ to the API — the right trade for a front-end exercise.
 
 | File | What it holds |
 |---|---|
-| `src/app/quotes.ts` | The API contract, transcribed from `QuoteDtos.cs`. Types, the `DetailState` union, and the server's own limits. |
-| `src/app/quotes-api.ts` | `@Injectable` owning the query state (`page`, `size`), the list `httpResource`, and the quote-detail `httpResource` behind a `detailState` façade. |
-| `src/app/quotes-list.ts` | The list screen. Filter state, derived values, row selection, and the template. |
-| `src/app/quote-detail.ts` | The detail pane for whichever row is selected. Reads one signal, `detailState()`, and nothing else. |
-| `src/app/quotes-api.detail.spec.ts` | The test that caught Day 13 piece 2's two real bugs — see below. |
-| `src/app/quote-form.ts` | The create form. Signal Forms, per-field ARIA wiring, focus-first-error on failed submit. |
+| `src/app/quotes.ts` | The API contract, transcribed from `QuoteDtos.cs`. Types and the server's own limits — no `DetailState` here as of Day 16, see `quote-detail.ts`. |
+| `src/app/quotes-api.ts` | `@Injectable` owning the query state (`page`, `size`), the list `httpResource`, and the `POST` command. The quote-detail fetch moved off this service on Day 16 — see below. |
+| `src/app/quotes-list.ts` | The list screen. Filter state, derived values, a `routerLink` per row, and the template. |
+| `src/app/quote-detail.ts` | The detail page, routed at `quotes/:id`. Owns its own `httpResource`, keyed on a route-bound `id` input — no `ActivatedRoute` injected, and no `QuotesApi` involvement at all. |
+| `src/app/quote-detail.spec.ts` | Drives `QuoteDetail` through real navigations via `RouterTestingHarness`. Carries forward Day 13 piece 2's two bug-catching cases (swallowed 404, stale-response race) and adds Day 16's id-validation cases. |
+| `src/app/quote-id.ts` | Validates a route's `:id` segment against the server's `{id:int}` constraint before it ever reaches a fetch — see `VERIFICATION-ROUTING.md`. |
+| `src/app/quote-form.ts` | The create form, routed at `quotes/new` behind `authGuard`. Signal Forms, per-field ARIA wiring, focus-first-error on failed submit. |
 | `src/app/quote-form.spec.ts` | 16 tests over the form's five states, its a11y contract, and the rendered hidden-region fix, including axe. |
+| `src/app/auth-guard.ts` | `CanActivateFn` guarding `quotes/new`. Returns a `UrlTree` redirect to `/login`, not `false` — see `VERIFICATION-ROUTING.md`. |
+| `src/app/login-page.ts` | Where the guard redirects. No real account system — sets a demo token on `AuthTokenStore` and sends the visitor back to wherever they were headed. |
+| `src/app/app.routes.ts` | The route table: four lazy `loadComponent` routes plus a wildcard redirect. |
 | `src/app/request-timeout.ts` | Interceptor bounding how long a request may hang. |
 | `src/app/api-contract.spec.ts` | Day 15's characterization test — pins the real API's shapes before any interceptor existed to consume them. |
 | `src/app/auth-header.ts` | Attaches `Authorization: Bearer <token>` to same-origin requests when `AuthTokenStore` has one. |
 | `src/app/error-mapping.ts` | Maps a failed response to a typed `AppError`, opt-in per request via the `MAP_ERRORS` context token. |
 | `src/app/retry-backoff.ts` | Retries a failed idempotent GET with increasing backoff; two real bugs caught in the same file — see `VERIFICATION-HTTP.md`. |
-| `src/app/app.config.ts` | Providers, including the ordered interceptor chain. Note what is *absent* — see below. |
+| `src/app/app.config.ts` | Providers: the ordered interceptor chain, and `provideRouter` with `withComponentInputBinding()` + `withViewTransitions()`. Note what is *absent* — see below. |
 | `BRIEF.md` | The prompt Day 13 piece 1 (the list) was built from. |
 | `BRIEF-DETAIL.md` | The prompt Day 13 piece 2 (the detail pane) was built from. |
 | `BRIEF-FORM.md` | The prompt Day 14 piece 1 (the create form) was built from. |
 | `BRIEF-HTTP.md` | The prompt Day 15 (HttpClient + interceptors) was built from. |
+| `BRIEF-ROUTING.md` | The prompt Day 16 (routing, lazy loading, guards) was built from. |
 | `VERIFICATION.md` | Day 13: what was exercised, what came back wrong, what would break. |
 | `VERIFICATION-FORM.md` | Day 14: the same, for the form — states, a11y method, five caught bugs. |
 | `SIGNAL-FORMS-VS-REACTIVE.md` | Day 14 piece 2: Signal Forms preview against Reactive Forms — simpler, still rough, and one over-claim checked and rejected rather than assumed. |
 | `VERIFICATION-HTTP.md` | Day 15: the characterization test, the interceptors, and two real bugs caught in the same file — one visible in the diff, one only in a fake-timer test. |
+| `VERIFICATION-ROUTING.md` | Day 16: lazy-chunk proof from the build output, the guard's redirect round-trip, and an unvalidated route `:id` that reached a real (wrongly-shaped) request. |
 
 ---
 
@@ -74,11 +81,12 @@ correct-looking in a light browser, unreadable in a dark one, because nothing
 ever painted a dark surface under the now-light text. One `--bg` token, set on
 `body`, fixes it globally instead of once per component.
 
-`app.ts` owns the page-level layout (`app.css`'s `.shell` grid) rather than
-either child component knowing where it sits: below ~64rem the detail pane
-stacks under the list as before, above it the pane becomes a sticky right
-column, so selecting a quote doesn't mean scrolling back up past however many
-rows are on the page to see what got selected.
+`app.ts` owns the page-level layout — `app.css`'s `.page` wrapper, a single
+max-width column every routed page renders inside — rather than any routed
+component knowing it needs one. This replaced a two-column `.shell`/`.aside`
+grid (list on the left, a sticky detail pane on the right) on Day 16: with
+real routing, list and detail are two separate URLs now, not two panes of
+one page, so there's nothing left to lay out side by side.
 
 Two type faces from Google Fonts, loaded in `index.html`: Source Serif 4 for
 the quoted text itself, Inter for everything the UI says about it (labels,
@@ -90,10 +98,10 @@ at runtime instead. Slightly slower first paint of styled text; a build that
 doesn't depend on outbound network access to finish.
 
 Arrow-key navigation between rows (`onListKeydown` in `quotes-list.ts`) moves
-*focus* only, not selection — the same division as a native `<select>`: arrows
-move you, Enter/Space (free, from using a real `<button>` per row) commits.
-Moving focus without also firing `selectQuote()` on every arrow press avoids a
-fetch per keystroke while scanning.
+*focus* only, not navigation — the same division as a native `<select>`:
+arrows move you, Enter (free, from each row being a real `<a routerLink>`
+now) commits. Moving focus without also navigating on every arrow press
+avoids a chunk load and a fetch per keystroke while scanning.
 
 ---
 
@@ -142,7 +150,10 @@ Written up in full in [`VERIFICATION.md`](VERIFICATION.md).
 
 **Piece 2 — the detail pane, two bugs, found by a test rather than by clicking**
 (there is no live Week-1 API in the environment this piece was verified in —
-see [`quotes-api.detail.spec.ts`](src/app/quotes-api.detail.spec.ts)):
+the spec that caught these was `quotes-api.detail.spec.ts` at the time;
+Day 16's routing moved the detail fetch onto the routed page itself, and
+[`quote-detail.spec.ts`](src/app/quote-detail.spec.ts) is its Day 16
+successor, still covering both cases below):
 
 4. **A swallowed error.** The first pass fetched the detail with
    `HttpClient.get().subscribe()` behind a `catchError` that mapped *every*
@@ -210,21 +221,43 @@ Full write-up, including the characterization test that pinned the real
 API's shapes before either interceptor existed, in
 [`VERIFICATION-HTTP.md`](VERIFICATION-HTTP.md).
 
+**Day 16 — routing, one bug, a route param nothing validated:**
+
+13. **An unvalidated route `:id` reaching a request.** `QuoteDetail`'s draft
+    read the route's `:id` with plain `Number(this.id())` and built the
+    fetch URL from it with no check at all — `/quotes/abc` sent
+    `GET /api/quotes/NaN`. The real endpoint is declared
+    `MapGet("/{id:int}", ...)`, so a non-numeric id doesn't reach the
+    handler that returns the friendly, typed 404 this app already knows how
+    to render — it falls through to ASP.NET's own generic routing 404
+    instead, a different, unhandled shape. Fixed with `parseQuoteId`
+    (`quote-id.ts`): reject anything that isn't a plain positive integer
+    before a request is ever built, with a dedicated `'invalid'` state for
+    what fails that check.
+
+Full write-up, including the lazy-chunk proof from `npm run build`'s own
+output and the guard's redirect round-trip, in
+[`VERIFICATION-ROUTING.md`](VERIFICATION-ROUTING.md).
+
 ---
 
 ## Tests
 
-One spec, added for piece 2: [`quotes-api.detail.spec.ts`](src/app/quotes-api.detail.spec.ts).
+One spec, added for piece 2: `quotes-api.detail.spec.ts` at the time (Day 16's
+routing moved the detail fetch off `QuotesApi` and onto the routed page
+itself, so this file's Day 16 successor is
+[`quote-detail.spec.ts`](src/app/quote-detail.spec.ts) — same cases carried
+forward, plus two more; see below).
 It exists because piece 1's three bugs were all caught by hand — reading the
 compiler's error, or clicking through the UI with the API stopped — and piece 2's
 two were not: a stale-response race depends on two requests resolving in a
 specific order, which is easy to miss by clicking and reliable to force with
 `HttpTestingController` controlling exactly when each one flushes.
 
-Six cases against `QuotesApi.selectQuote()` / `detailState()`: idle with nothing
-selected, loading, ready, clearing the selection, a 404 carrying its status code,
-and the race — select 1, then 2, flush 2's response before 1's, and assert the
-screen still shows 2.
+Six cases against `QuotesApi.selectQuote()` / `detailState()` at the time: idle
+with nothing selected, loading, ready, clearing the selection, a 404 carrying
+its status code, and the race — select 1, then 2, flush 2's response before
+1's, and assert the screen still shows 2.
 
 [`quote-form.spec.ts`](src/app/quote-form.spec.ts) adds sixteen more for Day 14:
 the form's five states (pristine, invalid, submitting, server-error, success),
@@ -260,8 +293,27 @@ Day 15 adds four more files: [`api-contract.spec.ts`](src/app/api-contract.spec.
 Vitest fake timers to make backoff timing exact rather than approximate —
 this is the file that caught both of Day 15's bugs).
 
+Day 16 replaces `quotes-api.detail.spec.ts` with
+[`quote-detail.spec.ts`](src/app/quote-detail.spec.ts) (still 6 cases —
+loading, ready, the 404, the stale-response race carried forward unchanged
+in substance, plus two id-validation cases replacing the old file's "idle
+with nothing selected" pair, which no longer applies once a routed page
+never exists without an `:id`) — driven through `RouterTestingHarness`
+navigations rather than a direct service-method call, so the route itself,
+not just the component in isolation, is what's under test. It also adds four
+new files: [`quote-id.spec.ts`](src/app/quote-id.spec.ts) (9 cases for
+`parseQuoteId` in isolation), [`auth-guard.spec.ts`](src/app/auth-guard.spec.ts)
+(2 cases: the `UrlTree` shape returned with and without a token),
+[`login-page.spec.ts`](src/app/login-page.spec.ts) (2 cases, including the
+redirect round-trip back to where the guard caught the visitor), and
+[`app.routes.spec.ts`](src/app/app.routes.spec.ts) (5 cases against the real
+route table from `app.routes.ts`, not a hand-picked test-only one — the
+guard's actual redirect, and an unmatched path actually reaching the list
+rather than a blank screen).
+
 **These tests do not run in CI.** `.github/workflows/ci.yml` builds and tests
 the three .NET projects and gates coverage at 80%; `quotes-ui` is not in it. So
-40 green tests (22 from Days 13–14, 18 from Day 15) are a local check, not a
-build gate — worth knowing before treating them as protection against
-regression.
+58 green tests (22 from Days 13–14, 18 from Day 15, 18 net new from Day 16 —
+`quote-detail.spec.ts`'s 6 cases replace rather than add to that count) are a
+local check, not a build gate — worth knowing before treating them as
+protection against regression.

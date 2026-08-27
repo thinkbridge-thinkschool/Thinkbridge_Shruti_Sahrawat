@@ -557,3 +557,58 @@ reading the code.
 Full write-up, including the states/edges table and what breaks if the
 contract changes, in
 [`VERIFICATION-HTTP.md`](quotes-ui/VERIFICATION-HTTP.md).
+
+## Day 16 — Routing, lazy loading, guards
+
+[`quotes-ui/BRIEF-ROUTING.md`](quotes-ui/BRIEF-ROUTING.md) asked for four
+things against the real Week-1 API this app already talks to: lazy-loaded
+routes, route params read from the real detail endpoint, a functional auth
+guard, and a View Transition between the quotes list and a quote detail.
+
+**Three real routes replace the always-visible layout.** `app.ts` used to
+compose `QuotesList`, `QuoteForm` and `QuoteDetail` all at once inside a
+two-column `.shell` grid. `app.routes.ts` now routes `quotes` (the list),
+`quotes/new` (the create form, guarded), and `quotes/:id` (the detail page)
+to their own pages, each via `loadComponent` rather than a top-level import —
+proven separate in `npm run build`'s own chunk output, not just asserted:
+four named lazy chunks (`quotes-list`, `quote-form`, `quote-detail`,
+`login-page`), none of them in the initial bundle.
+
+**Route params, and the boundary Angular's router doesn't draw.**
+`QuoteDetail`'s `id` input is bound straight from the route by
+`withComponentInputBinding()` — no `ActivatedRoute` injected in the
+component at all. But `GET /api/quotes/{id}` in
+[`EndpointExtensions.cs`](QuotesApi/Extensions/EndpointExtensions.cs) is
+declared `MapGet("/{id:int}", ...)` — a route constraint Angular's router has
+no equivalent of. `quotes/:id` matches *any* string in that segment, valid
+or not, and hands it straight to the component.
+
+**A functional auth guard, and a real place to send its redirect.**
+`authGuard` (`CanActivateFn`) protects `quotes/new` against
+`AuthTokenStore.token()` — the same stub Day 15 built, since there's still
+no real login flow and no server-side auth today. It returns a `UrlTree`
+redirect to a new `LoginPage`, not `false`: a guard that returns `false`
+alone cancels the navigation and stops there, with no atomic way to also
+land somewhere useful. `LoginPage` sets a demo token and sends the visitor
+on to wherever they were originally headed, via a `redirectTo` query param —
+made this way on purpose, so the guard's redirect is something a reviewer
+can actually click through, not a route that quietly 404s.
+
+**A View Transition via the router's own support**, `withViewTransitions()`
+in `app.config.ts`, rather than hand-wiring `document.startViewTransition()`
+into click handlers — every navigation gets it, not just the one pair of
+routes it was asked for.
+
+**One bug, a route `:id` nothing validated.** The draft read `:id` with a
+bare `Number(this.id())` straight into the fetch URL. `/quotes/abc` built
+and sent `GET /api/quotes/NaN` — and because the server's `{id:int}`
+constraint means that request never reaches `GetById`'s own handler at all,
+it comes back as ASP.NET's generic routing 404 instead of the friendly,
+typed one this app already knows how to render. `parseQuoteId`
+(`quote-id.ts`) draws that line client-side instead: an anchored `^\d+$`
+check before a request is ever built, with a dedicated `'invalid'` state for
+whatever fails it.
+
+Full write-up, including the lazy-chunk build output, the states/edges
+table, and what breaks if the id contract or the route structure changes,
+in [`VERIFICATION-ROUTING.md`](quotes-ui/VERIFICATION-ROUTING.md).
