@@ -25,6 +25,13 @@ import { AuthTokenStore } from './auth-header';
       color: var(--ink);
     }
 
+    h1 {
+      margin: 0 0 1rem;
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
     p {
       color: var(--muted);
       line-height: 1.6;
@@ -37,17 +44,22 @@ import { AuthTokenStore } from './auth-header';
 
     button {
       margin-top: 1rem;
-      padding: 0.6rem 1.4rem;
+      padding: 0.65rem 1.5rem;
       border: none;
-      border-radius: 8px;
+      border-radius: var(--radius-sm, 8px);
       background: var(--accent);
-      color: white;
+      color: var(--on-accent, white);
       font: inherit;
+      font-weight: 600;
       cursor: pointer;
+      box-shadow: var(--shadow-sm);
+      transition: background-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
     }
 
     button:hover {
       background: var(--accent-strong);
+      box-shadow: var(--shadow-md);
+      transform: translateY(-1px);
     }
 
     button:focus-visible {
