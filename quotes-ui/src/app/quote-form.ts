@@ -9,7 +9,7 @@ import {
 import { FormField, form, maxLength, required, submit, validate } from '@angular/forms/signals';
 import { RouterLink } from '@angular/router';
 import { AUTHOR_MAX_LENGTH, Quote, TEXT_MAX_LENGTH } from './quotes';
-import { QuotesApi } from './quotes-api';
+import { QuotesStore } from './quotes-store';
 
 /**
  * Create-a-quote form, posting to POST /api/quotes. Routed at `quotes/new`,
@@ -110,7 +110,7 @@ import { QuotesApi } from './quotes-api';
   `,
 })
 export class QuoteForm {
-  private readonly api = inject(QuotesApi);
+  private readonly store = inject(QuotesStore);
   private readonly host = inject(ElementRef<HTMLElement>);
 
   protected readonly AUTHOR_MAX = AUTHOR_MAX_LENGTH;
@@ -180,12 +180,12 @@ export class QuoteForm {
       onInvalid: () => this.focusFirstInvalid(),
 
       action: async (f) => {
-        const result = await this.api.createQuote(f().value());
+        const result = await this.store.createQuote(f().value());
 
         if (result.outcome === 'created') {
           this.created.set(result.quote);
           this.model.set({ author: '', text: '' });
-          this.api.reloadList();
+          this.store.reloadList();
           return undefined;
         }
 

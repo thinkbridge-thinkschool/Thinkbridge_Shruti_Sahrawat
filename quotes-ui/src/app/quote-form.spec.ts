@@ -34,7 +34,7 @@ import { AUTHOR_MAX_LENGTH, TEXT_MAX_LENGTH } from './quotes';
  * direct assertions on the attributes a screen reader would consume.
  *
  * `errorMappingInterceptor` is wired in here — not just left to its own
- * `error-mapping.spec.ts` — because `QuotesApi.createQuote` now depends on
+ * `error-mapping.spec.ts` — because `QuotesStore.createQuote` now depends on
  * it running: it opts the POST into `MAP_ERRORS` and classifies the
  * `AppError` the interceptor throws, not a raw `HttpErrorResponse`. Testing
  * this component without the interceptor its production `app.config.ts`
@@ -74,7 +74,7 @@ describe('QuoteForm — POST /api/quotes', () => {
     fixture.detectChanges();
     await settle();
 
-    // QuotesApi's list resource fires on construction — unrelated to the
+    // The store's list resource fires on construction — unrelated to the
     // POST under test, but a real request httpMock.verify() would flag.
     httpMock
       .expectOne((req) => req.url.startsWith('/api/quotes?'))

@@ -1,20 +1,18 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  computed,
-  effect,
-  inject,
-  linkedSignal,
-  signal,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, effect, inject } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
-import { MAX_SIZE, MIN_PAGE, MIN_SIZE, Quote } from './quotes';
-import { QuotesApi } from './quotes-api';
+import { QuotesStore } from './quotes-store';
 
-/** The five states this screen can be in. `@switch` renders exactly one. */
-type ViewState = 'loading' | 'error' | 'no-data' | 'no-matches' | 'ready';
-
+/**
+ * The quotes list screen.
+ *
+ * A thin reader over QuotesStore: template, plus intents that forward
+ * straight to the store. It derives nothing of its own — `visibleQuotes`,
+ * `totalCount`, `totalPages` and the `listState` machine all used to be
+ * computed here, which made it genuinely hard to tell which signals were the
+ * source of truth and which were consequences. They are all in the store
+ * now, next to the state they are derived from.
+ */
 @Component({
   selector: 'app-quotes-list',
   imports: [DatePipe, RouterLink],
@@ -40,8 +38,8 @@ type ViewState = 'loading' | 'error' | 'no-data' | 'no-matches' | 'ready';
           type="search"
           name="author"
           placeholder="e.g. Ada"
-          [value]="authorFilter()"
-          (input)="onFilter($any($event.target).value)"
+          [value]="store.authorFilter()"
+          (input)="store.setAuthorFilter($any($event.target).value)"
         />
       </label>
 
@@ -52,17 +50,29 @@ type ViewState = 'loading' | 'error' | 'no-data' | 'no-matches' | 'ready';
           name="size"
           [min]="1"
           [max]="100"
-          [value]="size()"
-          (input)="onSize($any($event.target).value)"
+          [value]="store.size()"
+          (input)="store.setSize($any($event.target).value)"
         />
       </label>
+
+      <a class="add-link" routerLink="/quotes/new">Add a quote</a>
     </form>
 
-    @switch (state()) {
+    <!-- Present unconditionally with only its content toggling: a live
+         region inserted at the same moment it gains text is announced
+         unreliably across screen readers, since the assistive tech has to
+         be observing the node before the mutation to report it. Same
+         reasoning as the form's banner, and the same bug Day 14 shipped
+         once by hiding it with a display swap. -->
+    <p class="delete-error" role="alert" [hidden]="!store.deleteError()">
+      {{ store.deleteError() }}
+    </p>
+
+    @switch (store.listState()) {
       @case ('loading') {
         <ul class="skeleton-list" role="status">
           <span class="visually-hidden">Loading quotes…</span>
-          @for (_ of skeletonRows(); track $index) {
+          @for (_ of store.skeletonRows(); track $index) {
             <li class="skeleton-row"></li>
           }
         </ul>
@@ -73,39 +83,34 @@ type ViewState = 'loading' | 'error' | 'no-data' | 'no-matches' | 'ready';
           <p>Could not load quotes.</p>
           <!-- statusCode(), not status(). status() is the resource lifecycle
                ('idle' | 'loading' | 'resolved' | 'error' | ...); the HTTP status
-               lives on statusCode(), which HttpResourceRef adds on top of the
-               base ResourceRef. It is undefined - not 0 - when the request
+               lives on statusCode(). It is undefined - not 0 - when the request
                never reached a server, which is what a stopped API or a
-               misconfigured proxy looks like from inside the browser. Worth
-               distinguishing: a 500 means the API answered and failed; nothing
-               at all means it was never asked. -->
+               misconfigured proxy looks like from inside the browser. -->
           <p class="detail">
-            @if (failureKind() === 'unreachable') {
+            @if (store.failureKind() === 'unreachable') {
               No response from the API. Is it running, and is the dev-server proxy pointed at the
               right port?
             } @else {
-              The API responded with HTTP {{ quotes.statusCode() }}.
+              The API responded with HTTP {{ store.statusCode() }}.
             }
           </p>
-          <button type="button" (click)="quotes.reload()">Try again</button>
+          <button type="button" (click)="store.reload()">Try again</button>
         </div>
       }
 
       @case ('no-data') {
         <p class="state">
-          The API returned no quotes on page {{ page() }}.
-          @if (page() > 1) {
-            <button type="button" (click)="firstPage()">Back to page 1</button>
+          The API returned no quotes on page {{ store.page() }}.
+          @if (store.page() > 1) {
+            <button type="button" (click)="store.firstPage()">Back to page 1</button>
           }
         </p>
       }
 
       @case ('no-matches') {
         <p class="state">
-          {{ totalOnPage() }} quotes on this page, none by an author matching “{{
-            authorFilter()
-          }}”.
-          <button type="button" (click)="clearFilter()">Clear filter</button>
+          No quotes on this page by an author matching “{{ store.authorFilter() }}”.
+          <button type="button" (click)="store.clearFilter()">Clear filter</button>
         </p>
       }
 
@@ -114,16 +119,14 @@ type ViewState = 'loading' | 'error' | 'no-data' | 'no-matches' | 'ready';
           <!-- track q.id, not $index. Tracking the index would make Angular
                reuse the DOM node at position 0 for whatever quote lands there
                next, so paging would mutate existing rows rather than replace
-               them — visible as stale text flashing between pages, and as lost
-               focus if a row ever holds an input. id is stable and unique. -->
-          @for (q of visibleQuotes(); track q.id) {
+               them - visible as stale text flashing between pages. -->
+          @for (q of store.visibleQuotes(); track q.id) {
             <li>
               <!-- A real <a routerLink>, not a click handler on the <li>, so
                    the row is reachable by keyboard and gets native link
-                   focus/activation semantics for free — and so a middle
-                   click or "open in new tab" on a row works the way it does
-                   on any other link, which a (click) handler alone cannot
-                   offer no matter how it's wired. -->
+                   focus/activation semantics for free - and so a middle
+                   click or "open in new tab" works the way it does on any
+                   other link, which a (click) handler cannot offer. -->
               <a class="quote-row" [routerLink]="['/quotes', q.id]">
                 <blockquote>{{ q.text }}</blockquote>
                 <footer>
@@ -133,11 +136,21 @@ type ViewState = 'loading' | 'error' | 'no-data' | 'no-matches' | 'ready';
                   </time>
                 </footer>
               </a>
+              <!-- Outside the <a>, not inside it: a button nested in a link
+                   is invalid HTML and its click would race the navigation. -->
+              <button
+                type="button"
+                class="delete"
+                [attr.aria-label]="'Delete quote by ' + q.author"
+                (click)="store.deleteQuote(q.id)"
+              >
+                Delete
+              </button>
             </li>
           } @empty {
             <!-- Unreachable: 'ready' is only reached when visibleQuotes() is
-                 non-empty. Kept because @empty is the block that would catch a
-                 future refactor moving the emptiness check out of state(). -->
+                 non-empty. Kept because @empty is the block that would catch
+                 a future refactor moving the emptiness check out of the store. -->
             <li class="state">Nothing to show.</li>
           }
         </ul>
@@ -145,17 +158,21 @@ type ViewState = 'loading' | 'error' | 'no-data' | 'no-matches' | 'ready';
     }
 
     <nav class="pager" aria-label="Pagination">
-      <button type="button" [disabled]="page() <= 1 || quotes.isLoading()" (click)="prevPage()">
+      <button
+        type="button"
+        [disabled]="store.page() <= 1 || store.isLoading()"
+        (click)="store.prevPage()"
+      >
         Previous
       </button>
       <span>
-        Page {{ page() }} of {{ totalPages() }}
-        <small>({{ totalCount() }} quotes total)</small>
+        Page {{ store.page() }} of {{ store.totalPages() }}
+        <small>({{ store.totalCount() }} quotes total)</small>
       </span>
       <button
         type="button"
-        [disabled]="page() >= totalPages() || quotes.isLoading()"
-        (click)="nextPage()"
+        [disabled]="store.page() >= store.totalPages() || store.isLoading()"
+        (click)="store.nextPage()"
       >
         Next
       </button>
@@ -163,105 +180,13 @@ type ViewState = 'loading' | 'error' | 'no-data' | 'no-matches' | 'ready';
   `,
 })
 export class QuotesList {
-  // ---- dependencies ---------------------------------------------------
-
   /**
-   * inject(), not a constructor parameter.
-   *
-   * The practical difference is that a field initialiser can use it. `page`
-   * and `size` below are aliases onto signals this service owns, and with
-   * constructor injection they could not be initialised until the constructor
-   * body ran — which is after every other field initialiser has already
-   * referenced them.
+   * inject(), not a constructor parameter — a field initialiser can use it,
+   * and the template reads `store` directly rather than re-exposing each
+   * signal as a local alias. Aliases were what made the old version look
+   * like it owned state it did not.
    */
-  private readonly api = inject(QuotesApi);
-
-  // ---- state ----------------------------------------------------------
-
-  /** Query state, owned by the service because it changes the request URL. */
-  readonly page = this.api.page;
-  readonly size = this.api.size;
-
-  /**
-   * View state, owned here because it never reaches the server — it narrows
-   * rows already fetched. Keeping it out of QuotesApi is what stops a
-   * keystroke in the filter box from triggering an HTTP request.
-   */
-  readonly authorFilter = signal('');
-
-  /** The resource itself: value(), isLoading(), error(), statusCode(). */
-  readonly quotes = this.api.result;
-
-  // ---- derived state --------------------------------------------------
-
-  /** Derived from two signals: the resource's value, and the filter text. */
-  readonly visibleQuotes = computed<Quote[]>(() => {
-    const items = this.quotes.value()?.items ?? [];
-    const term = this.authorFilter().trim().toLowerCase();
-    return term ? items.filter((q) => q.author.toLowerCase().includes(term)) : items;
-  });
-
-  /**
-   * The collection size, held across refetches.
-   *
-   * This was `computed(() => this.quotes.value()?.totalCount ?? 0)`, which was
-   * wrong in a way that only shows up on a slow request. httpResource clears
-   * value() to undefined whenever the request parameters change, so during
-   * every page change the count collapsed to 0, totalPages collapsed to 1, and
-   * the pager read "Page 3 of 1 (0 quotes total)" until the response landed.
-   * Normally a flicker; with the API stopped it froze there.
-   *
-   * linkedSignal exists for exactly this shape: a value derived from a source
-   * that should survive the source going momentarily absent. The previous
-   * value is carried forward rather than falling back to a zero that is not
-   * true. The initial 0 is the only honest answer before anything has loaded.
-   */
-  readonly totalCount = linkedSignal<number | undefined, number>({
-    source: () => this.quotes.value()?.totalCount,
-    computation: (incoming, previous) => incoming ?? previous?.value ?? 0,
-  });
-
-  /**
-   * Deliberately NOT retained. This one is about the page currently rendered,
-   * so 0 while loading is the truth — and state() checks isLoading() first, so
-   * it never reaches the 'no-data' branch on a transient zero.
-   */
-  readonly totalOnPage = computed(() => this.quotes.value()?.items.length ?? 0);
-
-  /** Also derived from two signals: totalCount and the page size. */
-  readonly totalPages = computed(() => Math.max(1, Math.ceil(this.totalCount() / this.size())));
-
-  /**
-   * Purely cosmetic: how many skeleton bars to draw while `quotes.isLoading()`
-   * is true. Capped so a page size of 100 doesn't render a hundred empty
-   * rows — the point is to suggest "a list is coming," not to preview its
-   * exact length, which the skeleton can't know yet anyway.
-   */
-  readonly skeletonRows = computed(() => Array.from({ length: Math.min(this.size(), 6) }));
-
-  /**
-   * Whether the request failed at the HTTP layer or never got that far.
-   * Different causes, different things for the reader to go and check.
-   */
-  readonly failureKind = computed<'unreachable' | 'http'>(() =>
-    this.quotes.statusCode() === undefined ? 'unreachable' : 'http',
-  );
-
-  /**
-   * One state, computed once, rendered by a single `@switch`.
-   *
-   * The two empty cases are kept apart on purpose. "The API has no quotes" and
-   * "your filter matched nothing" need different words and different recovery
-   * actions, and collapsing them into one `isEmpty` is the kind of shortcut
-   * that produces a Clear-filter button on a screen with no filter applied.
-   */
-  readonly state = computed<ViewState>(() => {
-    if (this.quotes.isLoading()) return 'loading';
-    if (this.quotes.error()) return 'error';
-    if (this.totalOnPage() === 0) return 'no-data';
-    if (this.visibleQuotes().length === 0) return 'no-matches';
-    return 'ready';
-  });
+  protected readonly store = inject(QuotesStore);
 
   constructor() {
     // Read-only effect: a running log of state transitions, which is the
@@ -272,42 +197,25 @@ export class QuotesList {
       // eslint-disable-next-line no-console
       console.log(
         '[quotes] state=%s page=%d size=%d shown=%d total=%d',
-        this.state(),
-        this.page(),
-        this.size(),
-        this.visibleQuotes().length,
-        this.totalCount(),
+        this.store.listState(),
+        this.store.page(),
+        this.store.size(),
+        this.store.visibleQuotes().length,
+        this.store.totalCount(),
       );
     });
-  }
-
-  // ---- intents --------------------------------------------------------
-
-  onFilter(value: string): void {
-    this.authorFilter.set(value);
-    // Filtering happens client-side over the current page only, so the page
-    // number is left alone on purpose. Resetting to page 1 here would imply
-    // the filter searches the whole collection, which it does not. See the
-    // note in VERIFICATION.md.
-  }
-
-  onSize(value: string): void {
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed)) return;
-    this.size.set(Math.min(MAX_SIZE, Math.max(MIN_SIZE, Math.trunc(parsed))));
-    this.page.set(MIN_PAGE);
-  }
-
-  clearFilter(): void {
-    this.authorFilter.set('');
   }
 
   /**
    * ArrowUp/ArrowDown move keyboard focus between rows without navigating —
    * the same division of labour as a native <select>: arrows move you,
-   * Enter (native <a> behaviour, free) commits. Moving focus only, rather
-   * than also navigating, is what stops someone scanning the list with the
-   * arrow keys from firing a chunk load and a fetch on every keypress.
+   * Enter (native <a> behaviour, free) commits. Moving focus without also
+   * navigating is what stops someone scanning the list with the arrow keys
+   * from firing a chunk load and a fetch on every keypress.
+   *
+   * The only thing left in this component that is genuinely about the DOM
+   * rather than about state — which is why it is the only method here that
+   * does not simply forward to the store.
    */
   onListKeydown(event: KeyboardEvent): void {
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
@@ -322,17 +230,5 @@ export class QuotesList {
     const delta = event.key === 'ArrowDown' ? 1 : -1;
     const nextIndex = Math.min(rows.length - 1, Math.max(0, currentIndex + delta));
     rows[nextIndex]?.focus();
-  }
-
-  firstPage(): void {
-    this.page.set(MIN_PAGE);
-  }
-
-  prevPage(): void {
-    this.page.update((p) => Math.max(MIN_PAGE, p - 1));
-  }
-
-  nextPage(): void {
-    this.page.update((p) => Math.min(this.totalPages(), p + 1));
   }
 }

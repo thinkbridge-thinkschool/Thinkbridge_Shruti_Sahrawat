@@ -25,7 +25,7 @@ type DetailPageState =
  * `id` arrives as a component input, bound automatically from the route
  * param by `withComponentInputBinding()` in app.config.ts — no
  * `ActivatedRoute` injected here at all. A field initialiser is still an
- * injection context (same fact `QuotesApi.result` relies on), which is what
+ * injection context (same fact the store's list resource relies on), which is what
  * lets `httpResource` be created directly on this component instead of
  * needing to live in a service the way `result` still does for the list.
  */
@@ -94,7 +94,7 @@ export class QuoteDetail {
 
   /**
    * `undefined` when quoteId() is null — httpResource's own signal for "no
-   * request right now" (the same guard QuotesApi's old detail() used for
+   * request right now" (the same guard the old QuotesApi.detail() used for
    * `selectedId() === null`). An invalid :id issues no request at all.
    */
   private readonly detail = httpResource<Quote>(() => {

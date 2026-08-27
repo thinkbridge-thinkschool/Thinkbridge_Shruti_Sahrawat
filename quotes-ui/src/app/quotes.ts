@@ -51,7 +51,7 @@ export const DEFAULT_SIZE = 10;
 // No shared DetailState type here as of Day 16 — the state a single-quote
 // lookup can be in now lives next to the one place that reads it,
 // QuoteDetail itself, since the fetch moved there too (route-driven, not
-// QuotesApi-driven; see quotes-api.ts). It also grew one more case than the
+// store-driven; see quotes-store.ts). It also grew one more case than the
 // old union had: 'invalid', for a route :id that never should have reached
 // a fetch at all — see quote-id.ts.
 

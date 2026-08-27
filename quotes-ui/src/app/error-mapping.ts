@@ -11,7 +11,7 @@ import { catchError, throwError } from 'rxjs';
  * line in either component — `httpResource`'s own status extraction expects
  * an `HttpErrorResponse`, not this interceptor's `AppError`.
  *
- * So this is opt-in per request rather than global. `QuotesApi.createQuote`
+ * So this is opt-in per request rather than global. `QuotesStore.createQuote`
  * sets it, because that call site already does its own by-hand status
  * parsing (see quotes-api.ts) and is a direct, natural place to have the
  * interceptor do that classification instead.
