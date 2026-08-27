@@ -2,10 +2,19 @@ import { ChangeDetectionStrategy, Component, computed, input } from '@angular/co
 import { DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { httpResource } from '@angular/common/http';
+import { parseQuoteId } from './quote-id';
 import { Quote } from './quotes';
 
-/** The states GET /api/quotes/{id} can be in, for whichever :id is routed to. */
+/**
+ * The states GET /api/quotes/{id} can be in, for whichever :id is routed to.
+ *
+ * 'invalid' is not an HTTP outcome at all — it is what a :id that never
+ * should have reached the API in the first place resolves to instead. See
+ * quote-id.ts for why this has to be caught here rather than left for the
+ * server's own {id:int}-constrained route to reject.
+ */
 type DetailPageState =
+  | { status: 'invalid'; raw: string }
   | { status: 'loading' }
   | { status: 'error'; statusCode?: number }
   | { status: 'ready'; quote: Quote };
@@ -29,6 +38,13 @@ type DetailPageState =
     <a class="back" routerLink="/quotes">&larr; Back to quotes</a>
 
     @switch (state().status) {
+      @case ('invalid') {
+        <div class="state error" role="alert">
+          <p>“{{ raw() }}” isn't a quote id.</p>
+          <p class="detail">Quote ids are positive whole numbers — this never reached the API.</p>
+        </div>
+      }
+
       @case ('loading') {
         <div class="skeleton-card" role="status">
           <span class="visually-hidden">Loading quote…</span>
@@ -64,11 +80,30 @@ type DetailPageState =
 export class QuoteDetail {
   readonly id = input.required<string>();
 
-  private readonly quoteId = computed(() => Number(this.id()));
+  /**
+   * `null` for anything that isn't a plain positive integer — see
+   * quote-id.ts. The Day 16 draft skipped this step entirely: it computed
+   * `Number(this.id())` straight into the fetch URL, so `/quotes/abc` built
+   * and sent `/api/quotes/NaN`. The server's own `{id:int}` route
+   * constraint would not have matched that request at all — it falls
+   * through to ASP.NET's generic routing 404, an empty body with none of
+   * the `title`/`detail` fields this page's 'error' branch expects to read.
+   * Rejecting it here means that mismatched failure mode is never reached.
+   */
+  private readonly quoteId = computed(() => parseQuoteId(this.id()));
 
-  private readonly detail = httpResource<Quote>(() => `/api/quotes/${this.quoteId()}`);
+  /**
+   * `undefined` when quoteId() is null — httpResource's own signal for "no
+   * request right now" (the same guard QuotesApi's old detail() used for
+   * `selectedId() === null`). An invalid :id issues no request at all.
+   */
+  private readonly detail = httpResource<Quote>(() => {
+    const id = this.quoteId();
+    return id === null ? undefined : `/api/quotes/${id}`;
+  });
 
   readonly state = computed<DetailPageState>(() => {
+    if (this.quoteId() === null) return { status: 'invalid', raw: this.id() };
     if (this.detail.isLoading()) return { status: 'loading' };
     if (this.detail.error()) return { status: 'error', statusCode: this.detail.statusCode() };
     const quote = this.detail.value();
@@ -83,5 +118,10 @@ export class QuoteDetail {
   readonly statusCode = computed(() => {
     const s = this.state();
     return s.status === 'error' ? s.statusCode : undefined;
+  });
+
+  readonly raw = computed(() => {
+    const s = this.state();
+    return s.status === 'invalid' ? s.raw : '';
   });
 }
