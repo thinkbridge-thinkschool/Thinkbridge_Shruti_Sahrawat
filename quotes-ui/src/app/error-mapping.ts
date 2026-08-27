@@ -3,10 +3,10 @@ import { catchError, throwError } from 'rxjs';
 
 /**
  * Opts a single request into error mapping. Default `false` — most requests
- * in this app go through `httpResource` (the list and the detail pane), and
+ * in this app go through `httpResource` (the list and the detail page), and
  * `httpResource` already draws its own error distinction via `statusCode()`
- * / `error()`, which `QuotesList.failureKind` and `QuoteDetail`'s
- * `DetailState` are built around. Rewriting the thrown error's shape for
+ * / `error()`, which `QuotesList.failureKind` and `QuoteDetail`'s own
+ * `DetailPageState` are built around. Rewriting the thrown error's shape for
  * *every* request would silently break both of those without touching a
  * line in either component — `httpResource`'s own status extraction expects
  * an `HttpErrorResponse`, not this interceptor's `AppError`.
