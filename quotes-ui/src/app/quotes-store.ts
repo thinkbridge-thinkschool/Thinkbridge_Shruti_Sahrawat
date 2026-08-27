@@ -16,6 +16,9 @@ import {
 /** The five states the list screen can be in. `@switch` renders exactly one. */
 export type ListState = 'loading' | 'error' | 'no-data' | 'no-matches' | 'ready';
 
+/** Shared empty mask, so an untouched store never allocates a new Set per read. */
+const EMPTY_IDS: ReadonlySet<number> = new Set<number>();
+
 /**
  * The store for the quotes-list feature.
  *
@@ -62,15 +65,41 @@ export class QuotesStore {
   // ---- optimistic mutation state ---------------------------------------
 
   /**
-   * Rows removed on screen ahead of the server confirming it.
+   * Ids hidden on screen ahead of the server confirming their deletion.
    *
-   * A snapshot of the list as it was before this delete started, so a
-   * failure can put things back the way they were.
+   * A **mask over server truth**, not a parallel copy of the list — and a
+   * `linkedSignal` rather than a plain `signal` so that it prunes itself.
+   * The draft held this as a plain signal that only ever grew, plus a
+   * whole-list snapshot to restore on failure, and that was wrong in a way
+   * a test caught on the *success* path: once the refetch after a
+   * successful delete came back without the deleted row, the id was still
+   * sitting in this set, so `totalCount` subtracted it a second time. The
+   * server said 1, the mask said "minus one more", the pager read 0 with a
+   * row visibly on screen. See VERIFICATION-STATE.md.
+   *
+   * The rule this encodes: an id is worth masking only while the server is
+   * still returning it. Once the server stops, the mask is not just
+   * redundant, it is actively wrong. Deriving that from the payload means
+   * nothing has to remember to clean up — which is the whole reason the
+   * imperative version had a bug and this one structurally cannot.
    */
-  private readonly rollbackSnapshot = signal<Quote[] | null>(null);
+  private readonly removedIds = linkedSignal<PagedResult<Quote> | undefined, ReadonlySet<number>>({
+    source: () => this.resource.value(),
+    computation: (payload, previous) => {
+      const prev = previous?.value ?? EMPTY_IDS;
 
-  /** Ids currently hidden because a delete for them is in flight or done. */
-  private readonly removedIds = signal<ReadonlySet<number>>(new Set());
+      // Mid-fetch: httpResource clears value() to undefined when the request
+      // parameters change. Pruning against "no items" would drop every mask
+      // and flash the deleted rows back for one frame before the new page
+      // lands. Carry the mask forward instead — the same reasoning that
+      // makes serverTotal below a linkedSignal rather than a computed.
+      if (payload === undefined) return prev;
+      if (prev.size === 0) return prev;
+
+      const stillReturned = new Set(payload.items.map((q) => q.id));
+      return new Set([...prev].filter((id) => stillReturned.has(id)));
+    },
+  });
 
   /** The last delete failure, for the component to surface. `null` when fine. */
   private readonly _deleteError = signal<string | null>(null);
@@ -201,9 +230,6 @@ export class QuotesStore {
    */
   async deleteQuote(id: number): Promise<void> {
     this._deleteError.set(null);
-
-    // Snapshot the list as it stands, so a failure can put it back.
-    this.rollbackSnapshot.set(this.presentItems());
     this.removedIds.update((ids) => new Set(ids).add(id));
 
     try {
@@ -212,23 +238,33 @@ export class QuotesStore {
           context: new HttpContext().set(MAP_ERRORS, true),
         }),
       );
+      // Refetch so the page, the count and any row promoted from the next
+      // page all come from the server rather than being guessed at here.
+      // The mask prunes itself when that response lands.
       this.reload();
     } catch (error) {
       const appError = error as AppError;
 
       if (appError.kind === 'notFound') {
-        // Already gone. The user's intent is satisfied.
+        // Already gone — deleted by someone else, or this is a retry of a
+        // request that already succeeded. The user asked for it not to
+        // exist, and it does not exist. Rolling back would put a row back
+        // that the very next refetch removes again: a flicker that tells
+        // the user something untrue. Keep it masked and resync.
         this.reload();
         return;
       }
 
-      // Put the list back the way it was before this delete started.
-      const snapshot = this.rollbackSnapshot();
-      if (snapshot) {
-        this.removedIds.set(
-          new Set(this.serverItems().filter((q) => !snapshot.some((s) => s.id === q.id)).map((q) => q.id)),
-        );
-      }
+      // Roll back exactly the row that failed, by lifting its mask — and
+      // nothing else. The draft restored a whole-list snapshot here, which
+      // cannot distinguish "this delete failed" from "a different delete
+      // that happened to overlap succeeded", and would resurrect a row the
+      // server had already deleted.
+      this.removedIds.update((ids) => {
+        const next = new Set(ids);
+        next.delete(id);
+        return next;
+      });
       this._deleteError.set('Could not delete that quote. It has been put back.');
     }
   }

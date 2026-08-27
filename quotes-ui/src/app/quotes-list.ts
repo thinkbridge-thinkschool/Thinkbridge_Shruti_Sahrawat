@@ -64,7 +64,7 @@ import { QuotesStore } from './quotes-store';
          be observing the node before the mutation to report it. Same
          reasoning as the form's banner, and the same bug Day 14 shipped
          once by hiding it with a display swap. -->
-    <p class="delete-error" role="alert" [hidden]="!store.deleteError()">
+    <p class="state error delete-error" role="alert" [hidden]="!store.deleteError()">
       {{ store.deleteError() }}
     </p>
 

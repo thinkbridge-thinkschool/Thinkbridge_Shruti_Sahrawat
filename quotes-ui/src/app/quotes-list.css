@@ -171,20 +171,14 @@ code {
   outline-offset: 1px;
 }
 
-/* Always in the DOM, content-toggled — same live-region reasoning as the
-   form's banner. Hidden state needs an explicit display:none because the
-   shown state sets display:block at the same specificity as the browser's
-   own [hidden] rule, and that tie goes to the author stylesheet. This is
-   the exact bug Day 14 shipped for a few hours. */
+/* Reuses .state.error above rather than restating its border/background.
+   The explicit display:none is still needed: the shown state is display:block
+   at the same specificity as the browser's own [hidden] rule, and that tie
+   goes to the author stylesheet — the exact bug Day 14 shipped for a few
+   hours as two empty coloured boxes. */
 .delete-error {
   display: block;
-  margin: 0 0 1.25rem;
-  padding: 0.8rem 1rem;
-  border: 1px solid var(--bad);
-  border-left-width: 3px;
-  border-radius: 8px;
-  background: var(--bad-soft);
-  color: var(--ink-soft);
+  margin-bottom: 1.25rem;
   font-size: 0.9rem;
 }
 
@@ -192,7 +186,7 @@ code {
   display: none;
 }
 
-.controls .add-link {
+.add-link {
   align-self: end;
   padding: 0.5rem 0.9rem;
   border: 1px solid var(--accent);
@@ -202,13 +196,8 @@ code {
   text-decoration: none;
 }
 
-.controls .add-link:hover {
+.add-link:hover {
   background: var(--accent-soft);
-}
-
-.controls .add-link:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 
 .quote-row {
