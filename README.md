@@ -1,13 +1,13 @@
 # Thinkbridge Backend Assignment — Shruti Sahrawat
 
-Days 1–14. All code in this repository. **207 .NET tests passing** across three test projects, plus an Angular 21 front end in [`quotes-ui/`](quotes-ui) with its own 21-test Vitest suite.
+Days 1–16. All code in this repository. **207 .NET tests passing** across three test projects, plus an Angular 21 front end in [`quotes-ui/`](quotes-ui) with its own 70-test Vitest suite.
 
 | Suite | Tests | Runtime |
 |---|---|---|
 | `OrderRefactor.Tests` | 41 | ~5s |
 | `Quotes.Tests.Unit` | 123 | ~1s |
 | `Quotes.Tests.Integration` | 43 | ~2m37s, of which ~100s is Docker starting SQL Server 2022 |
-| `quotes-ui` (`npm test`) | 21 | ~3s |
+| `quotes-ui` (`npm test`) | 70 | ~3s |
 
 Coverage is gated once, on the union of the three .NET suites — see [Day 4](#day-4--observability). `quotes-ui`'s suite is separate: a different runtime (Vitest, not xUnit) and not part of the 80% .NET gate.
 
@@ -612,3 +612,57 @@ whatever fails it.
 Full write-up, including the lazy-chunk build output, the states/edges
 table, and what breaks if the id contract or the route structure changes,
 in [`VERIFICATION-ROUTING.md`](quotes-ui/VERIFICATION-ROUTING.md).
+
+## Day 16, task 2 — State management, signals first
+
+[`quotes-ui/BRIEF-STATE.md`](quotes-ui/BRIEF-STATE.md) asked for a small
+feature's state modelled as a signal store against the real Week-1 API —
+signals first, no store library — plus the rule for when this app *should*
+reach for one.
+
+**One store replaces a split that was accidental.** `page` and `size` lived
+in `QuotesApi`; `authorFilter`, `totalCount`, `totalPages`, `visibleQuotes`
+and the state machine lived in `QuotesList`. Defensible, but stated nowhere.
+[`quotes-store.ts`](quotes-ui/src/app/quotes-store.ts) makes the rule the
+code's shape: **query state** (`page`, `size`) is in the request URL so
+writing it fetches; **view state** (`authorFilter`) never reaches the server;
+**server state** belongs to `httpResource` rather than being copied out of
+it; **everything else is `computed`**. `QuotesList` is now a thin reader that
+derives nothing.
+
+**One new feature, chosen because it forces the interesting states.**
+`DELETE /api/quotes/{id:int}` has been implemented since Day 1 and nothing
+in the UI ever called it. It answers `204 No Content` — no body — or a plain
+`ProblemDetails` 404. The delete is applied optimistically: the row leaves on
+click, not on the server's answer, and comes back if the request fails. A
+`404` is deliberately treated as success rather than rolled back — the server
+is reporting the quote is gone, which is what the user asked for, and
+restoring a row the next refetch would remove again is a flicker that tells
+the user something untrue.
+
+**One bug, and it was on the success path.** The draft held the
+optimistic-removal set as a plain signal that only ever grew. That is correct
+while the server is still returning the removed row — but once the
+post-delete refetch landed, the server's own `totalCount` had already
+dropped, and the store subtracted the row a second time. The server said one
+quote remained; the pager rendered "0 quotes total" with a row visibly on
+screen. Every delete permanently cost the count one more. The fix makes the
+mask a `linkedSignal` keyed on the resource payload, so an id is masked only
+while the server still returns it — the mask prunes itself, and no code path
+has to remember to clean up. Rollback then reduces to lifting the mask for
+the one failed id, which also makes it structurally impossible for one
+delete's failure to resurrect a different, overlapping delete that succeeded.
+
+**The judgment call.** [`WHEN-TO-ADOPT-NGRX.md`](quotes-ui/WHEN-TO-ADOPT-NGRX.md)
+is the threshold for reaching for a store library, written as five tripwires
+that can each be checked against the repo and answered yes or no — three or
+more independent features *writing* the same state, "how did we get here"
+becoming a recurring question, one action fanning out to three or more
+unrelated features, optimistic updates needing to queue or undo as a set, or
+more than two or three people writing state code in the same area. It also
+separates `@ngrx/signals` from full NgRx Store + Effects, because those are
+not the same commitment and should not share a threshold.
+
+Full write-up, including the states/edges table and what breaks if the
+delete or list contract changes, in
+[`VERIFICATION-STATE.md`](quotes-ui/VERIFICATION-STATE.md).

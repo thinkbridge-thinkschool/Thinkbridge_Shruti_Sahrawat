@@ -43,9 +43,10 @@ to the API — the right trade for a front-end exercise.
 | File | What it holds |
 |---|---|
 | `src/app/quotes.ts` | The API contract, transcribed from `QuoteDtos.cs`. Types and the server's own limits — no `DetailState` here as of Day 16, see `quote-detail.ts`. |
-| `src/app/quotes-api.ts` | `@Injectable` owning the query state (`page`, `size`), the list `httpResource`, and the `POST` command. The quote-detail fetch moved off this service on Day 16 — see below. |
-| `src/app/quotes-list.ts` | The list screen. Filter state, derived values, a `routerLink` per row, and the template. |
-| `src/app/quote-detail.ts` | The detail page, routed at `quotes/:id`. Owns its own `httpResource`, keyed on a route-bound `id` input — no `ActivatedRoute` injected, and no `QuotesApi` involvement at all. |
+| `src/app/quotes-store.ts` | The signal store for the list feature: query state (`page`, `size`), view state (`authorFilter`), the list `httpResource`, every derivation, and the create/delete commands. Replaced `quotes-api.ts` on Day 16 task 2. |
+| `src/app/quotes-store.spec.ts` | 12 tests over the store's five list states and the optimistic-delete path, including two overlapping deletes where one fails. Caught the mask bug — see `VERIFICATION-STATE.md`. |
+| `src/app/quotes-list.ts` | The list screen. A thin reader over the store — template and intents, no derivation of its own. |
+| `src/app/quote-detail.ts` | The detail page, routed at `quotes/:id`. Owns its own `httpResource`, keyed on a route-bound `id` input — no `ActivatedRoute` injected, and deliberately no store involvement: its state is one route param and one resource. |
 | `src/app/quote-detail.spec.ts` | Drives `QuoteDetail` through real navigations via `RouterTestingHarness`. Carries forward Day 13 piece 2's two bug-catching cases (swallowed 404, stale-response race) and adds Day 16's id-validation cases. |
 | `src/app/quote-id.ts` | Validates a route's `:id` segment against the server's `{id:int}` constraint before it ever reaches a fetch — see `VERIFICATION-ROUTING.md`. |
 | `src/app/quote-form.ts` | The create form, routed at `quotes/new` behind `authGuard`. Signal Forms, per-field ARIA wiring, focus-first-error on failed submit. |
@@ -63,12 +64,15 @@ to the API — the right trade for a front-end exercise.
 | `BRIEF-DETAIL.md` | The prompt Day 13 piece 2 (the detail pane) was built from. |
 | `BRIEF-FORM.md` | The prompt Day 14 piece 1 (the create form) was built from. |
 | `BRIEF-HTTP.md` | The prompt Day 15 (HttpClient + interceptors) was built from. |
-| `BRIEF-ROUTING.md` | The prompt Day 16 (routing, lazy loading, guards) was built from. |
+| `BRIEF-STATE.md` | The prompt Day 16 task 2 (the signal store) was built from. |
+| `BRIEF-ROUTING.md` | The prompt Day 16 task 1 (routing, lazy loading, guards) was built from. |
 | `VERIFICATION.md` | Day 13: what was exercised, what came back wrong, what would break. |
 | `VERIFICATION-FORM.md` | Day 14: the same, for the form — states, a11y method, five caught bugs. |
 | `SIGNAL-FORMS-VS-REACTIVE.md` | Day 14 piece 2: Signal Forms preview against Reactive Forms — simpler, still rough, and one over-claim checked and rejected rather than assumed. |
 | `VERIFICATION-HTTP.md` | Day 15: the characterization test, the interceptors, and two real bugs caught in the same file — one visible in the diff, one only in a fake-timer test. |
-| `VERIFICATION-ROUTING.md` | Day 16: lazy-chunk proof from the build output, the guard's redirect round-trip, and an unvalidated route `:id` that reached a real (wrongly-shaped) request. |
+| `VERIFICATION-ROUTING.md` | Day 16 task 1: lazy-chunk proof from the build output, the guard's redirect round-trip, and an unvalidated route `:id` that reached a real (wrongly-shaped) request. |
+| `VERIFICATION-STATE.md` | Day 16 task 2: the store's states and edges, an optimistic-removal mask that only ever grew, and what breaks if the delete/list contract changes. |
+| `WHEN-TO-ADOPT-NGRX.md` | The threshold at which this app should reach for a store library — five tripwires, each checkable against the repo. |
 
 ---
 
@@ -115,10 +119,16 @@ consequence: a piece of state that is a plain field instead of a signal updates
 in memory and never re-renders, silently. That is why everything here is a
 signal.
 
-**State is split by whether it changes the request.** `page` and `size` live in
-`QuotesApi` because they change the URL and cause a fetch. The author filter
-lives in the component because it narrows rows already in hand — keeping it out
-of the service is what stops a keystroke triggering an HTTP call.
+**State is split by whether it changes the request.** That rule used to be
+followed by accident — `page` and `size` in the service, the filter in the
+component — with nothing stating it. `QuotesStore` makes it the store's
+organising shape: **query state** (`page`, `size`) is in the request URL, so
+writing it causes a fetch; **view state** (`authorFilter`) never reaches the
+server, which is what stops a keystroke triggering an HTTP call; **server
+state** belongs to `httpResource` rather than being copied out of it; and
+everything else is `computed`. If a value can be calculated from those, it is
+not allowed its own writable signal — that is how two sources of truth start
+disagreeing, and Day 16 task 2's bug was exactly that.
 
 **The filter only searches the current page.** With 10,000 quotes and a page size
 of 100, filtering for an author who exists but is not on the current page shows
@@ -239,6 +249,30 @@ Full write-up, including the lazy-chunk proof from `npm run build`'s own
 output and the guard's redirect round-trip, in
 [`VERIFICATION-ROUTING.md`](VERIFICATION-ROUTING.md).
 
+**Day 16 task 2 — the signal store, one bug, on the success path:**
+
+14. **An optimistic-removal mask that only ever grew.** `deleteQuote`
+    removes the row on click and subtracts it from `totalCount`, which is
+    right while the server is still returning that row. But the draft never
+    cleared the id once the post-delete refetch landed — and by then the
+    server's own `totalCount` had already dropped. So the store subtracted
+    it twice: the server said one quote remained, and the pager rendered
+    **"0 quotes total" with a row visibly on screen**. Easy to miss because
+    it is on the *success* path, one line below where you are looking, and
+    it compounds — every delete permanently costs the count one more. Fixed
+    by making the mask a `linkedSignal` keyed on the resource payload, so an
+    id is masked only while the server still returns it and the mask prunes
+    itself. Rollback then became "lift the mask for the failed id" rather
+    than "restore a whole-list snapshot", which also makes it impossible for
+    one delete's failure to resurrect a different, overlapping delete that
+    had already succeeded.
+
+Full write-up, including the 404-means-success decision and what breaks if
+the delete or list contract changes, in
+[`VERIFICATION-STATE.md`](VERIFICATION-STATE.md). The threshold at which
+this app should stop hand-rolling and adopt a store library is in
+[`WHEN-TO-ADOPT-NGRX.md`](WHEN-TO-ADOPT-NGRX.md).
+
 ---
 
 ## Tests
@@ -311,9 +345,19 @@ route table from `app.routes.ts`, not a hand-picked test-only one — the
 guard's actual redirect, and an unmatched path actually reaching the list
 rather than a blank screen).
 
+Day 16 task 2 adds [`quotes-store.spec.ts`](src/app/quotes-store.spec.ts) — 12
+cases over `QuotesStore`: the five list states (loading, error, no-data,
+no-matches, ready), the filter proving it stays client-side (`httpMock.verify()`
+is the assertion — a keystroke that reached the server would leave an unflushed
+request behind), and the optimistic-delete path in full: removed-before-the-
+server-answers, the count while in flight, confirmed by `204`, rolled back on
+`500`, a `404` treated as success, and two overlapping deletes where one
+succeeds and the other fails. That last one is why the rollback is written the
+way it is; the count assertion on the `204` case is what caught the real bug.
+
 **These tests do not run in CI.** `.github/workflows/ci.yml` builds and tests
 the three .NET projects and gates coverage at 80%; `quotes-ui` is not in it. So
-58 green tests (22 from Days 13–14, 18 from Day 15, 18 net new from Day 16 —
-`quote-detail.spec.ts`'s 6 cases replace rather than add to that count) are a
-local check, not a build gate — worth knowing before treating them as
-protection against regression.
+70 green tests (22 from Days 13–14, 18 from Day 15, 18 net new from Day 16
+task 1 — `quote-detail.spec.ts`'s 6 cases replace rather than add to that
+count — and 12 from task 2's store) are a local check, not a build gate —
+worth knowing before treating them as protection against regression.
