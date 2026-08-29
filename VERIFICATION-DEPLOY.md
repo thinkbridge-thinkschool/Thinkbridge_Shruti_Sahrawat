@@ -167,3 +167,50 @@ southindia` in `DEPLOY-RUNBOOK.md` step 6 and the resource id built from
 `<RG>` are both point-in-time facts pulled from step 1's `az containerapp
 list`; nothing here re-discovers them automatically if the API gets
 redeployed somewhere else later.
+
+
+## Lighthouse — the actual audit, run against the live URL
+
+Run with `npx lighthouse https://white-bush-08e3cd710.7.azurestaticapps.net/quotes`,
+after the meta-description and non-blocking-font fixes were pushed (`45a76ac`)
+and confirmed live (SEO moved from 90 → 100 between the pre-fix and post-fix
+runs, which is itself proof the deploy actually took effect, not just a
+retest of the same page).
+
+| Category | Score | vs. ≥95 target |
+|---|---|---|
+| Accessibility | 98 | met |
+| Best Practices | 100 | met |
+| SEO | 100 | met |
+| Performance | 89 | **not met** |
+
+**Performance, diagnosed rather than left as a bare number.** The weighted
+metrics that actually drive this score: Total Blocking Time 40ms (score 1.0,
+weight 30 — the single largest lever), Cumulative Layout Shift 0 (score 1.0,
+weight 25), Largest Contentful Paint 3.0s (score 0.78, weight 25), Speed
+Index 3.3s (score 0.9, weight 10), First Contentful Paint 3.0s (score 0.5,
+weight 10). Initial server response time is 130ms (`server-response-time`
+audit, score 1.0) — the Static Web App itself answers fast. Render-blocking
+requests, the issue found in the first run, is gone entirely from the second
+run's audit list after the font-loading fix.
+
+What's left is FCP/LCP sitting around 3 seconds. The reason: `index.html`'s
+body is just `<app-root></app-root>` — nothing paints until the JS bundle
+downloads, parses, and Angular bootstraps and renders, and Lighthouse's
+default CLI run simulates a throttled mobile network and a slowed-down CPU.
+That combination costing ~3 seconds for a ~277KB (77KB transferred) initial
+bundle is an inherent property of a client-rendered SPA measured this way,
+not a defect introduced by this deploy. Checked against a false lead before
+settling on this explanation: the Lighthouse `--preset=desktop` run scored
+*worse* (Performance 79), which rules out "it's just the throttling
+preset's fault, desktop would clear it" — the real fix would be a static
+HTML/CSS loading shell inside `<app-root>` that paints before any JS runs,
+which is a real code change, not attempted here given how late in the
+exercise this finding came in.
+
+**What would close this gap, concretely, if attempted later:** a plain,
+non-Angular loading skeleton written directly into `index.html`'s body,
+so first paint happens on HTML parse alone, before the JS bundle is even
+requested — Angular would overwrite it once it bootstraps, the same way the
+existing in-app skeleton state already works, just moved one layer earlier
+in the load sequence.
