@@ -1,31 +1,39 @@
 /*
  * Design tokens, shared by every component via `var(--…)`.
  *
- * One system-wide instead of the light/dark pairs each component used to
- * hardcode: `color-scheme: light dark` here is also what tells the browser's
- * own UI (scrollbars, form controls) which palette is in play. `--bg` gets
- * an explicit value and is set on <body> in this file — a page with no
- * background color set is transparent, which is exactly how the old dark
- * mode went unreadable: text turned light, the page underneath stayed
- * whatever the browser chrome happened to be, and nothing composited.
+ * Single dark theme, applied unconditionally rather than driven by
+ * `prefers-color-scheme` — every component already reads exclusively through
+ * these tokens (nothing in the app hardcodes a color), so retheming here is
+ * enough to reskin the whole app with zero per-component changes.
+ * `color-scheme: dark` is also what tells the browser's own UI (scrollbars,
+ * form controls) to render dark. `--bg` gets an explicit value and is set on
+ * <body> below — a page with no background color set is transparent, which
+ * is exactly how the old dark mode went unreadable: text turned light, the
+ * page underneath stayed whatever the browser chrome happened to be, and
+ * nothing composited.
  */
 
 :root {
-  color-scheme: light dark;
+  color-scheme: dark;
 
-  --bg: #f7f4fb;
-  --surface: #ffffff;
-  --surface-sunken: #f1ecf9;
-  --ink: #1b1725;
-  --ink-soft: #4a4358;
-  --muted: #6e6780;
-  --rule: #e5e0ee;
-  --rule-strong: #cfc7de;
-  --accent: #5b3fa8;
-  --accent-soft: rgba(91, 63, 168, 0.08);
-  --accent-strong: #4a3389;
-  --bad: #a83a28;
-  --bad-soft: rgba(168, 58, 40, 0.08);
+  --bg: #0b0a10;
+  --surface: #17151f;
+  --surface-sunken: #1f1c29;
+  --ink: #f5f3fa;
+  --ink-soft: #cbc4dc;
+  --muted: #8d84a3;
+  --rule: #2b2736;
+  --rule-strong: #3e394f;
+  --accent: #b794f6;
+  --accent-soft: rgba(183, 148, 246, 0.14);
+  --accent-strong: #d3b8ff;
+  --bad: #ff7a7a;
+  --bad-soft: rgba(255, 122, 122, 0.14);
+
+  /* Warm accent used sparingly — the quote-mark glyph, nothing interactive —
+     so it reads as a design flourish rather than competing with --accent for
+     "this is clickable". */
+  --highlight: #f2b84b;
 
   --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-quote: 'Source Serif 4', Georgia, 'Times New Roman', serif;
@@ -35,34 +43,14 @@
   --radius-md: 10px;
   --radius-lg: 14px;
 
-  --on-accent: #ffffff;
+  --on-accent: #17101f;
 
-  --shadow-sm: 0 1px 2px rgba(27, 23, 37, 0.06), 0 1px 1px rgba(27, 23, 37, 0.04);
-  --shadow-md: 0 10px 24px rgba(27, 23, 37, 0.10), 0 2px 6px rgba(27, 23, 37, 0.06);
+  /* Shadows read as almost nothing on a near-black page, so depth comes from
+     a faint light edge plus a tinted glow on hover rather than a dark drop
+     shadow — the thing a shadow normally darkens is already this dark. */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.03);
+  --shadow-md: 0 16px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(183, 148, 246, 0.10);
   --shadow-focus-accent: 0 0 0 4px var(--accent-soft);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #16131f;
-    --surface: #1e1a2a;
-    --surface-sunken: #211d30;
-    --ink: #ece8f4;
-    --ink-soft: #c0b9d0;
-    --muted: #9d95b3;
-    --rule: #322c44;
-    --rule-strong: #453d5e;
-    --accent: #a992e8;
-    --accent-soft: rgba(169, 146, 232, 0.14);
-    --accent-strong: #c3b0f0;
-    --bad: #e0897a;
-    --bad-soft: rgba(224, 137, 122, 0.12);
-
-    --on-accent: #1b1725;
-
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35), 0 1px 1px rgba(0, 0, 0, 0.22);
-    --shadow-md: 0 12px 28px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.3);
-  }
 }
 
 * {
@@ -70,7 +58,7 @@
 }
 
 html {
-  color-scheme: light dark;
+  color-scheme: dark;
 }
 
 body {

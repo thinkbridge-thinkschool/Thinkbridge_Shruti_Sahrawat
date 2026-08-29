@@ -100,14 +100,14 @@ code {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1.25rem;
 }
 
 .skeleton-row {
-  height: 5.25rem;
-  border-radius: var(--radius-md);
+  height: 12rem;
+  border-radius: var(--radius-lg);
   background: linear-gradient(
     100deg,
     var(--surface) 40%,
@@ -132,47 +132,68 @@ code {
 
 /* ---- the list ---------------------------------------------------------- */
 
+/* A card grid, not a stacked list of rows — each quote reads as its own
+   rectangle rather than a line item, which is the point: this screen is a
+   gallery of quotes, not a table of records. */
 .quotes {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1.25rem;
 }
 
-/* The row is a grid so the delete button sits beside the link rather than
-   inside it — a <button> nested in an <a> is invalid HTML, and its click
-   would race the navigation. */
+/* position: relative so the delete button (below) can sit as an absolute
+   overlay in the corner instead of a grid column — a <button> nested in the
+   <a> below is still invalid HTML, so it stays a sibling of .quote-row, just
+   positioned over the card rather than beside it. */
 .quotes li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
+  position: relative;
   border: 1px solid var(--rule);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   padding: 0;
   background: var(--surface);
   box-shadow: var(--shadow-sm);
   transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
-/* :has() lets the row itself lift on hover even though the hover target is
-   the inner .quote-row button -- an ordinary child selector can't reach
-   upward from the thing being hovered to the row that visually contains it. */
+/* :has() lets the card itself lift on hover even though the hover target is
+   the inner .quote-row link -- an ordinary child selector can't reach
+   upward from the thing being hovered to the card that visually contains it. */
 .quotes li:has(.quote-row:hover) {
   border-color: var(--accent);
   box-shadow: var(--shadow-md);
-  transform: translateY(-1px);
+  transform: translateY(-3px);
 }
 
 .quotes li .delete {
-  margin-right: 0.9rem;
-  padding: 0.35rem 0.7rem;
-  font-size: 0.82rem;
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.78rem;
   color: var(--bad);
   border-color: transparent;
-  background: transparent;
+  background: var(--surface);
   box-shadow: none;
+  opacity: 0;
+  transition: opacity 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+
+/* Visible on hover/focus-within so the card reads cleanly at rest, but never
+   hidden from keyboard/touch users who can't "hover" — :focus-within keeps it
+   reachable by Tab, and touch devices get no hover state at all so it just
+   stays visible there via the prefers rule below. */
+.quotes li:hover .delete,
+.quotes li:focus-within .delete {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .quotes li .delete {
+    opacity: 1;
+  }
 }
 
 .quotes li .delete:not(:disabled):hover {
@@ -228,9 +249,14 @@ code {
 }
 
 .quote-row {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 1.1rem;
   width: 100%;
-  padding: 1rem 1.15rem;
+  height: 100%;
+  min-height: 11.5rem;
+  padding: 1.6rem 1.5rem 1.35rem;
   border: none;
   border-radius: inherit;
   background: transparent;
@@ -253,16 +279,45 @@ code {
 blockquote {
   margin: 0;
   font-family: var(--font-quote);
-  font-size: 1.08rem;
+  font-size: 1.1rem;
   line-height: 1.5;
+  /* Clamped rather than left to grow unbounded — a long quote would otherwise
+     make one card in the grid dramatically taller than its neighbours, which
+     reads as a layout bug even though every card's content is correct. */
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Decorative opening mark. `aria-hidden` is an HTML attribute, not a CSS
+   property — there is no way to apply it to generated content from here,
+   so some screen reader/browser combinations may announce the glyph as
+   literal text ("left double quotation mark") ahead of the real quote. Not
+   fixed blind: the actual accessible content is unaffected either way — the
+   quote text itself lives in <blockquote>, not in this pseudo-element — so
+   the worst case is one extra spoken word, not a wrong or missing quote.
+   Warm/amber rather than the interactive purple: this is the one place in
+   the app that color is doing pure ornament, and giving it the same hue as
+   every button and link would blur the two apart. */
+.quotes blockquote::before {
+  content: '\201C';
+  display: block;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 2.75rem;
+  line-height: 0.6;
+  color: var(--highlight);
+  margin-bottom: 0.6rem;
 }
 
 .quotes footer {
   display: flex;
+  align-items: baseline;
   justify-content: space-between;
   gap: 1rem;
-  margin-top: 0.65rem;
-  font-size: 0.82rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--rule);
+  font-size: 0.8rem;
   color: var(--muted);
 }
 
