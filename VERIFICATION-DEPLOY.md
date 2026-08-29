@@ -97,6 +97,61 @@ Lighthouse's Best Practices score but wrong for that would break the fonts
 silently with no way for me to catch it without a live page to load —
 noted as a gap, not fixed blind.
 
+## Live verification — after DEPLOY-RUNBOOK.md steps 1-6 actually ran
+
+Everything below is real evidence from the deployed resources, not a plan.
+
+**The Static Web App is live at
+`https://white-bush-08e3cd710.7.azurestaticapps.net`.** `az staticwebapp
+create --sku Standard` succeeded in `rg-thinkschool-dev2`;
+`deploy-swa.yml`'s first run failed on a missing secret (expected, before
+the GitHub secret existed), the second run — after the secret was set —
+finished green, and the live URL served the app.
+
+**The linked backend needed one extra fix not anticipated in the brief.**
+`az staticwebapp backends link` initially rejected with `(BadRequest) Only
+Container Apps supporting https are allowed as Linked Backends` --
+`az containerapp show ... --query properties.configuration.ingress` showed
+`"allowInsecure": true`. Fixed with `az containerapp ingress update
+--allow-insecure false`, then the link succeeded
+(`provisioningState: Succeeded`).
+
+**Direct access to the container app's own domain is now genuinely
+refused, confirmed, not assumed.** `curl.exe -i` against
+`quotes-api.blacksand-b575aaa0.southindia.azurecontainerapps.io/api/quotes`
+directly returns:
+
+```
+HTTP/1.1 401 Unauthorized
+www-authenticate: Bearer realm="quotes-api.blacksand-b575aaa0.southindia.azurecontainerapps.io"
+x-ms-middleware-request-id: 35bac598-9525-471a-9408-d7c6f7baac35
+```
+
+The `x-ms-middleware-request-id` header is Azure's own platform auth
+middleware, added automatically by the backend link -- this is the
+"Azure Static Web Apps (Linked)" identity provider from the docs cited in
+`BRIEF-DEPLOY.md`, actually intercepting the request, not a config value
+sitting unused.
+
+**Traffic proxied through the Static Web App gets through and returns real
+data.** `https://white-bush-08e3cd710.7.azurestaticapps.net/quotes` renders
+a full card grid of real quotes, fetched via the same
+`/api/quotes?page&size` call the app always made -- no code change, exactly
+as the brief's architecture choice predicted.
+
+**One consequence of the lock-down working: `seed-quotes.ps1`'s default
+target stopped working.** The script originally posted straight to the
+container app's own domain -- once that domain started refusing direct
+traffic, so did the seed script, for the identical reason curl was refused
+above. Reseeded by pointing `-ApiBaseUrl` at the Static Web App domain
+instead (`.\scripts\seed-quotes.ps1 -ApiBaseUrl
+"https://white-bush-08e3cd710.7.azurestaticapps.net"`), which succeeded --
+itself further proof the SWA-to-backend path is the only one still open.
+
+**Still open:** the actual Lighthouse audit. Nothing available through this
+session can run it; the four category scores have to come from Chrome
+DevTools or `npx lighthouse <url> --view`, run against the live URL above.
+
 ## What breaks if the architecture changes
 
 **A second frontend or a mobile client needs the same API**, one that can't
