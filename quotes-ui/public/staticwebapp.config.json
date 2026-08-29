@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json.schemastore.org/staticwebapp.config.json",
+
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": [
+      "/api/*",
+      "/*.{css,js,mjs,json,ico,png,jpg,jpeg,svg,webp,gif,woff,woff2,ttf,map,txt}"
+    ]
+  },
+
+  "routes": [
+    {
+      "route": "/*.{js,mjs,css,woff,woff2,ttf,svg,ico,png,jpg,jpeg,webp,gif}",
+      "headers": {
+        "cache-control": "public, max-age=31536000, immutable"
+      }
+    },
+    {
+      "route": "/index.html",
+      "headers": {
+        "cache-control": "no-cache"
+      }
+    }
+  ],
+
+  "globalHeaders": {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()"
+  },
+
+  "mimeTypes": {
+    ".json": "application/json"
+  }
+}
