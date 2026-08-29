@@ -77,6 +77,49 @@ Why the linked-backend model over a literal Managed Identity token. Why
 `ci.yml` instead of one workflow doing both. I will be asked to defend each
 one.
 
+## Where this diverges from the literal brief wording
+
+The Day 17 brief text asks for two things this deploy does not literally
+have: a custom domain, and API calls authenticated by a real Managed-Identity
+token. Both are deliberate scope decisions, made with you, not oversights
+found after the fact.
+
+**Custom domain.** Skipped for this submission. The live URL
+(`https://white-bush-08e3cd710.7.azurestaticapps.net`) is a real, live,
+fully-HTTPS Azure endpoint — a custom domain on top of it is a DNS/CNAME
+step (`az staticwebapp hostname set` plus a CNAME or ALIAS record at a
+registrar) that doesn't touch the auth model or the Lighthouse score being
+graded here. Nothing about the current setup blocks adding one later —
+`DEPLOY-RUNBOOK.md` step 8 has the exact commands ready for whenever a real
+domain is available.
+
+**Managed Identity.** The brief's exact wording is "the code that
+authenticates to your Week-1 API via Managed Identity" and "the API calls
+use a managed-identity token." What's actually running instead is Azure's
+SWA-linked-backend model (see above, and the live verification section in
+`VERIFICATION-DEPLOY.md`): the container app's `Azure Static Web Apps
+(Linked)` identity provider refuses every request that didn't arrive through
+this specific Static Web App — confirmed live with a direct `curl` returning
+`401` with a `www-authenticate: Bearer` header. That genuinely satisfies the
+brief's other line, "zero stored secret anywhere in the repo or in app
+settings" — there is no key, token, or credential anywhere in this deploy.
+It does not satisfy the literal ask of an MI-minted bearer token being
+validated, because there is no token in this design at all; the trust is
+platform-level routing, not a credential exchange.
+
+A real MI flow would additionally need: a system-assigned identity enabled
+on the Static Web App, an Entra ID app registration (or exposed API scope)
+on the container app's side, an auth library such as `Microsoft.Identity.Web`
+wired into `QuotesApi/Program.cs` to validate an incoming bearer token's
+issuer and audience, and a role assignment granting the SWA's identity
+permission to call it. The concrete thing that would then break: any change
+to that app registration, its allowed audiences, or the identity's role
+assignment would take the API down with 401s until the config was fixed —
+exactly the class of failure the current linked-backend model doesn't have,
+since it has no token to expire, rotate, or misconfigure. That's a
+materially larger, riskier change than what shipped here, and one we chose
+not to make this late in the exercise rather than rush untested.
+
 ---
 
 ## What I changed after reading the output
