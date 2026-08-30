@@ -1,0 +1,19 @@
+[← Back to full README](../../README.md)
+
+## Bugs these tests caught
+
+**A startup bug that would have broken any clean deployment.** All 23 integration tests failed on their first run — inside `Program.cs`, not in test code. `Quote.IsDeleted` existed on the model but had never been captured in a migration, so `Database.Migrate()` threw `PendingModelChangesWarning` against any fresh database. My local `quotes.db` predated the drift, so it had never surfaced in development. A clean clone would not have booted. Fixed in [`20260812113000_AddQuoteIsDeleted.cs`](../../QuotesApi/Migrations/20260812113000_AddQuoteIsDeleted.cs).
+
+**A regression I introduced myself, caught within the hour.** Adding `[Authorize(Policy = "AdminOnly")]` to `CreateOrder` immediately broke an existing Day 2 test that posted without a token — it started returning 401 before reaching the logic under test. The suite caught it the same hour I wrote it. I fixed the test, not the policy.
+
+**Every error response advertised the wrong media type.** `ExceptionHandlingMiddleware` set `Response.ContentType = "application/problem+json"` and then called `WriteAsJsonAsync`, which assigns `"application/json; charset=utf-8"` unconditionally and silently overwrote it. A client keying off `application/problem+json` would not have recognised a single one of these as a problem document. Invisible until a test asserted the header rather than the body.
+
+**A hardcoded exporter endpoint that only worked on one machine.** `Program.cs` shipped spans to a literal `http://localhost:4317`. In Azure that meant every span was exported into nothing — no error, no log line, the same silent shape as the App Insights connection-string bug on Day 5, sitting one layer beneath it. Under `dotnet test` the same literal was loud instead of silent: with no collector listening, every export waited out its timeout and every `WebApplicationFactory` disposal blocked on a final flush. The integration suite went from seconds to **41 minutes**. The endpoint now comes from configuration, and no configured endpoint means no exporter is registered.
+
+**The auth scheme router disagreed with the validator it routes to.** The policy-scheme lambda compared the token issuer against a hardcoded `"OrderRefactorIssuer"` while the validator read `ValidIssuer` from configuration. Renaming `Jwt:Issuer` would have routed every internally-issued token to the Entra validator, which would have rejected all of them. It also matched `"Bearer "` case-sensitively, against RFC 7235. Neither was reachable by test until the logic was pulled out of `Program.cs`.
+
+**The suite was passing because of a file on my laptop.** After `Jwt:Key` left `appsettings.json`, the tests kept going green — on my machine, via `dotnet user-secrets`. The moment the test host stopped running as `Development` for an unrelated reason, eleven tests failed at once. A fresh clone on a CI runner would have failed the same way the first time anyone else ran it. The key now arrives through the environment, the way production delivers it.
+
+**A test that asserted the old, broken behaviour.** `CreateQuote_EvenWithFakeClockOverridden_CreatedAtStillReflectsRealSystemTime` documented the `IClock` gap honestly, and was correct when written. Fixing the endpoint made it wrong, and it had been failing since — a red test that read like a known limitation. It is now two positive assertions, one of which reads the row back out of SQL Server to prove the injected instant was persisted rather than merely echoed.
+
+---
