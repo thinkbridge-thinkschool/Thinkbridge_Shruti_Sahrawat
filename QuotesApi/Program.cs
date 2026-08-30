@@ -12,6 +12,7 @@ using Microsoft.EntityFrameworkCore;
 using QuotesApi.Data;
 using QuotesApi.Extensions;
 using QuotesApi.Middleware;
+using QuotesApi.BackgroundJobs;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -130,6 +131,12 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddScoped<ICollectionRepository, CollectionRepository>();
 builder.Services.AddSingleton<IClock, SystemClock>();
 
+// Day 18: background jobs. One shared bounded queue, and the hosted
+// service that drains it - see QuotesApi/BackgroundJobs/ for why each
+// piece is shaped the way it is.
+builder.Services.AddSingleton<IBackgroundTaskQueue>(_ => new BackgroundTaskQueue(capacity: 100));
+builder.Services.AddHostedService<QueuedHostedService>();
+
 var app = builder.Build();
 
 app.UseSerilogRequestLogging();
@@ -162,6 +169,21 @@ app.MapGet("/api/demo/resilience", async (IHttpClientFactory factory, Cancellati
             statusCode: 503,
             title: "Downstream call failed after retries");
     }
+});
+// Demo endpoint: enqueues slow work and returns immediately, proving the
+// request thread never blocks on it. The queued work has nothing real to
+// compute - it just sleeps and logs - so what it demonstrates is the
+// handoff itself, not any particular job.
+app.MapPost("/api/demo/queue-work", async (IBackgroundTaskQueue queue, int delayMs) =>
+{
+    await queue.QueueBackgroundWorkItemAsync(async token =>
+    {
+        Log.Information("Background work item started, will run for {DelayMs}ms", delayMs);
+        await Task.Delay(delayMs, token);
+        Log.Information("Background work item finished");
+    });
+
+    return Results.Accepted(value: new { queued = true, delayMs });
 });
 app.MapQuoteEndpoints();
 app.MapProfilingEndpoints();
