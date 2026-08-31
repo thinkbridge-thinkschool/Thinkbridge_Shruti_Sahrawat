@@ -40,6 +40,9 @@ describe('QuotesStore', () => {
     author,
     text: `Quote text ${id}`,
     createdAt: '2026-03-14T09:30:00',
+    // The store does no ownership filtering of its own - the server returns
+    // only what the caller may see - so a single fixed owner is enough here.
+    ownerId: 1,
   });
 
   /** The real GET envelope: items/page/size/totalCount, not a bare array. */

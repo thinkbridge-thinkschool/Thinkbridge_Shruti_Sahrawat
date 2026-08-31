@@ -15,11 +15,22 @@ public class QuoteRepository : IQuoteRepository
         _logger = logger;
     }
 
-    public async Task<(IReadOnlyList<Quote> Items, int TotalCount)> GetPagedAsync(int page, int size, CancellationToken ct)
+    public async Task<(IReadOnlyList<Quote> Items, int TotalCount)> GetPagedAsync(int page, int size, int? ownerId, CancellationToken ct)
     {
-        _logger.LogInformation("Fetching quotes page {Page} size {Size}", page, size);
-        var totalCount = await _context.Quotes.CountAsync(ct);
-        var items = await _context.Quotes
+        _logger.LogInformation("Fetching quotes page {Page} size {Size} owner {OwnerId}", page, size, ownerId);
+
+        // One query shape, built once and used for both the count and the page,
+        // so the two can never disagree about which rows they are describing.
+        // Counting the whole table and then paging a filtered set is the classic
+        // way to end up with "Page 1 of 4" above a list of three rows.
+        var query = _context.Quotes.AsQueryable();
+        if (ownerId is not null)
+        {
+            query = query.Where(q => q.OwnerId == ownerId);
+        }
+
+        var totalCount = await query.CountAsync(ct);
+        var items = await query
             .OrderBy(q => q.Id)
             .Skip((page - 1) * size)
             .Take(size)

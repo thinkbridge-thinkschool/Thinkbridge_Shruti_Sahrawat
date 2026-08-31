@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, effect, inject } from '@angular/core';
 import { DatePipe } from '@angular/common';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
+import { AuthService } from './auth';
 import { QuotesStore } from './quotes-store';
 
 /**
@@ -25,9 +26,26 @@ import { QuotesStore } from './quotes-store';
   styleUrl: './quotes-list.css',
   template: `
     <header>
+      <div class="account">
+        @if (auth.user(); as user) {
+          <span class="who">
+            Signed in as <strong>{{ user.email }}</strong>
+            @if (auth.isAdmin()) {
+              <span class="role-badge">admin</span>
+            }
+          </span>
+        }
+        <button type="button" class="sign-out" (click)="signOut()">Sign out</button>
+      </div>
+
       <h1>Quotes</h1>
       <p class="sub">
-        Reading <code>GET /api/quotes?page&amp;size</code> from the Week&nbsp;1 API.
+        @if (auth.isAdmin()) {
+          Every quote in the database, including ones created before accounts
+          existed. You can delete any of them.
+        } @else {
+          The quotes you have added. Nobody else can see or delete them.
+        }
       </p>
     </header>
 
@@ -90,11 +108,20 @@ import { QuotesStore } from './quotes-store';
             @if (store.failureKind() === 'unreachable') {
               No response from the API. Is it running, and is the dev-server proxy pointed at the
               right port?
+            } @else if (store.statusCode() === 401) {
+              <!-- The token expired, or was signed with a key this server no
+                   longer has. Either way the useful thing to offer is a way
+                   back in, not a retry button that will fail identically. -->
+              Your session has expired. Sign in again to see your quotes.
             } @else {
               The API responded with HTTP {{ store.statusCode() }}.
             }
           </p>
-          <button type="button" (click)="store.reload()">Try again</button>
+          @if (store.statusCode() === 401) {
+            <button type="button" (click)="signOut()">Sign in again</button>
+          } @else {
+            <button type="button" (click)="store.reload()">Try again</button>
+          }
         </div>
       }
 
@@ -131,6 +158,13 @@ import { QuotesStore } from './quotes-store';
                 <blockquote>{{ q.text }}</blockquote>
                 <footer>
                   <cite>{{ q.author }}</cite>
+                  <!-- Only an admin sees rows they do not own, so only an
+                       admin needs to be told whose a row is. Showing "yours"
+                       on every row of an ordinary user's own list would be
+                       noise on every line. -->
+                  @if (auth.isAdmin()) {
+                    <span class="owner">{{ ownerLabel(q.ownerId) }}</span>
+                  }
                   <time [attr.datetime]="q.createdAt">
                     {{ q.createdAt | date: 'mediumDate' }}
                   </time>
@@ -187,6 +221,8 @@ export class QuotesList {
    * like it owned state it did not.
    */
   protected readonly store = inject(QuotesStore);
+  protected readonly auth = inject(AuthService);
+  private readonly router = inject(Router);
 
   constructor() {
     // Read-only effect: a running log of state transitions, which is the
@@ -217,6 +253,30 @@ export class QuotesList {
    * rather than about state — which is why it is the only method here that
    * does not simply forward to the store.
    */
+  /**
+   * Whose quote this is, in words, for the admin view.
+   *
+   * "Unowned" is a real category, not a missing value: those rows were created
+   * before the API had accounts. They are shown to admins and to nobody else,
+   * rather than being backfilled to whoever registered first.
+   */
+  ownerLabel(ownerId: number | null): string {
+    if (ownerId === null) return 'unowned';
+    return ownerId === this.auth.user()?.id ? 'yours' : `user #${ownerId}`;
+  }
+
+  /**
+   * Forgets the token and goes to the sign-in page.
+   *
+   * Navigates rather than leaving the user on a list that is now guaranteed to
+   * fail — the guard would bounce them on the next navigation anyway, and
+   * doing it here means they never see a 401 they cannot act on.
+   */
+  async signOut(): Promise<void> {
+    this.auth.signOut();
+    await this.router.navigateByUrl('/login');
+  }
+
   onListKeydown(event: KeyboardEvent): void {
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
 

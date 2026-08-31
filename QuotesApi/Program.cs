@@ -13,6 +13,13 @@ using QuotesApi.Data;
 using QuotesApi.Extensions;
 using QuotesApi.Middleware;
 using QuotesApi.BackgroundJobs;
+using QuotesApi.Configuration;
+using QuotesApi.Models;
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -137,11 +144,109 @@ builder.Services.AddSingleton<IClock, SystemClock>();
 builder.Services.AddSingleton<IBackgroundTaskQueue>(_ => new BackgroundTaskQueue(capacity: 100));
 builder.Services.AddHostedService<QueuedHostedService>();
 
+// ---------------------------------------------------------------------------
+// Authentication. Accounts own quotes; see Extensions/AuthEndpoints.cs.
+// ---------------------------------------------------------------------------
+
+builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection(AuthOptions.SectionName));
+
+var jwtSection = builder.Configuration.GetSection(JwtOptions.SectionName);
+var jwtOptions = jwtSection.Get<JwtOptions>() ?? new JwtOptions();
+
+if (string.IsNullOrWhiteSpace(jwtOptions.Key))
+{
+    if (builder.Environment.IsProduction())
+    {
+        // Refuse to start rather than fall back to something.
+        //
+        // Any default here - a literal in this file, an empty string, a
+        // "development" placeholder - is a key that is in the repository, and a
+        // key in the repository lets anyone who can read it mint a token for
+        // any account, admin included. A server that will not start is a
+        // problem someone fixes in five minutes; a server running on a
+        // published key is a problem nobody notices.
+        throw new InvalidOperationException(
+            "Jwt:Key is not configured. Set it as an environment variable (Jwt__Key) on the " +
+            "container app before starting in Production.");
+    }
+
+    // Outside Production, generate one per process. Tokens then stop working
+    // when the app restarts, which is mildly annoying locally and is the
+    // correct trade: the alternative is a shared development key that
+    // eventually gets copied into a real deployment.
+    jwtOptions.Key = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
+
+    // Console, not Log.Warning. Serilog is configured inside UseSerilog, which
+    // does not run until the host is built - a few lines below this. Anything
+    // written through Log here goes to the silent default logger and is never
+    // seen, which for a warning about key configuration is the worst possible
+    // outcome.
+    Console.WriteLine("[startup] WARNING: Jwt:Key was not configured. Generated an ephemeral key for " +
+                      "this process - tokens will stop working when it restarts. Set it with " +
+                      "`dotnet user-secrets set \"Jwt:Key\" \"<a long random string>\"` to avoid this.");
+}
+
+builder.Services.Configure<JwtOptions>(options =>
+{
+    options.Key = jwtOptions.Key;
+    options.Issuer = jwtOptions.Issuer;
+    options.Audience = jwtOptions.Audience;
+    options.AccessTokenLifetime = jwtOptions.AccessTokenLifetime;
+});
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            // Every one of these is on deliberately. Turning any of them off is
+            // how a token that should have been rejected gets accepted:
+            // an unvalidated lifetime accepts last year's token, an unvalidated
+            // signing key accepts a token anyone minted, and an unvalidated
+            // issuer or audience accepts a token minted for a different system
+            // that happens to share a key.
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = jwtOptions.Issuer,
+            ValidAudience = jwtOptions.Audience,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.Key)),
+
+            // Stated rather than left to the default, because [Authorize(Roles
+            // = ...)] and IsInRole read whichever claim type is named here. A
+            // mismatch between what JwtTokenService writes and what this reads
+            // does not fail loudly - it just means no user is ever in any role,
+            // and the admin quietly sees what an ordinary user sees.
+            NameClaimType = ClaimTypes.Name,
+            RoleClaimType = ClaimTypes.Role,
+
+            // Default is five minutes of leeway on expiry. An eight-hour token
+            // does not need it, and it means a token tested as "expired" is
+            // still accepted for another five minutes - which makes the expiry
+            // test either slow or wrong.
+            ClockSkew = TimeSpan.Zero
+        };
+    });
+
+builder.Services.AddAuthorization();
+
+builder.Services.AddSingleton<IPasswordHasher, BcryptPasswordHasher>();
+builder.Services.AddScoped<ITokenService, JwtTokenService>();
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+
 var app = builder.Build();
 
 app.UseSerilogRequestLogging();
 app.UseCorrelationId();
 app.UseExceptionHandling();
+
+// Authentication before authorization, and both before any endpoint runs.
+// Reversed, authorization would run against an anonymous principal that
+// authentication has not filled in yet - and every [Authorize] endpoint would
+// reject every request, including correctly signed ones.
+app.UseAuthentication();
+app.UseAuthorization();
 
 using (var scope = app.Services.CreateScope())
 {
@@ -185,6 +290,7 @@ app.MapPost("/api/demo/queue-work", async (IBackgroundTaskQueue queue, int delay
 
     return Results.Accepted(value: new { queued = true, delayMs });
 });
+app.MapAuthEndpoints();
 app.MapQuoteEndpoints();
 app.MapProfilingEndpoints();
 app.MapControllers();

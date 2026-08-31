@@ -376,3 +376,73 @@ button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* ---- account bar (Day 19) ------------------------------------------------
+   Sits above the heading rather than beside it: at narrow widths a row that
+   has to hold an email address and a button next to an <h1> either wraps
+   badly or truncates the address, and the address is the part that answers
+   "am I signed in as the right person". */
+
+.account {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.account .who strong {
+  color: var(--ink);
+  font-weight: 600;
+  /* An email is one long unbreakable token to a layout engine; without this
+     a long address pushes the sign-out button off a narrow screen. */
+  overflow-wrap: anywhere;
+}
+
+.role-badge {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent, white);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: 0.05em;
+}
+
+.sign-out {
+  padding: 0.35rem 0.8rem;
+  border: 1px solid var(--border, #d7d7e0);
+  border-radius: var(--radius-sm, 8px);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+
+.sign-out:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sign-out:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Only rendered in the admin view - see the template's own note on why an
+   ordinary user is not told "yours" on every row of their own list. */
+.owner {
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: var(--surface-muted, #eeeef4);
+  font-size: 0.75rem;
+  color: var(--muted);
+}

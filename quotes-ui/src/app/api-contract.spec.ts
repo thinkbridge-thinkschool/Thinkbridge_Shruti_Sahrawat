@@ -51,6 +51,7 @@ describe('Week-1 API contract — characterization', () => {
           author: 'Ada Lovelace',
           text: 'That brain of mine is something more than merely mortal.',
           createdAt: '2026-08-13T09:30:00Z',
+          ownerId: 7,
         },
       ],
       page: 1,
@@ -74,6 +75,11 @@ describe('Week-1 API contract — characterization', () => {
     expect(quote.id).toBe(42);
     expect(quote.author).toBe('Ada Lovelace');
     expect(typeof quote.createdAt).toBe('string');
+
+    // ownerId joined the contract on Day 19, when quotes gained owners. It is
+    // nullable on the wire, not absent: QuoteResponse always carries the
+    // field, and null means a quote created before accounts existed.
+    expect(quote.ownerId).toBe(7);
   });
 
   it('POST /api/quotes with an invalid body returns 400 as ValidationProblemDetails with capitalised error keys', async () => {

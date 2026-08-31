@@ -71,6 +71,11 @@ describe('QuoteDetail — GET /api/quotes/{id} (route-driven)', () => {
     author: `Author ${id}`,
     text: `Quote text ${id}`,
     createdAt: '2026-03-14T09:30:00',
+    // Present because the API always sends it (QuoteResponse). Null rather
+    // than a number: this spec is about the detail page's state machine, and
+    // an owner id here would suggest ownership is something this component
+    // reasons about, which it is not - the server decides what it may see.
+    ownerId: null,
   });
 
   it('reports loading the instant the route activates, before the response arrives', async () => {

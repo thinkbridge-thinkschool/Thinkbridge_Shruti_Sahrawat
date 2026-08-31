@@ -13,6 +13,9 @@ public class QuotesDbContext : DbContext
     // 1. Added the Collections DbSet
     public DbSet<Collection> Collections { get; set; } 
 
+    // Accounts. See Models/User.cs.
+    public DbSet<User> Users => Set<User>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // Your existing Quote configuration
@@ -21,6 +24,36 @@ public class QuotesDbContext : DbContext
             entity.HasKey(q => q.Id);
             entity.Property(q => q.Author).IsRequired().HasMaxLength(200);
             entity.Property(q => q.Text).IsRequired().HasMaxLength(1000);
+
+            // Indexed because it is now in the WHERE clause of the busiest
+            // query in the API: every listing a non-admin makes filters by it.
+            // Without the index that filter is a full table scan on the one
+            // path every signed-in user hits on every page load.
+            entity.HasIndex(q => q.OwnerId);
+
+            // No foreign key to Users on purpose. A real FK would mean either
+            // cascading a user's deletion into their quotes or blocking the
+            // deletion outright, and neither is a decision this API has been
+            // asked to make yet - there is no delete-account endpoint. Leaving
+            // it as a plain indexed column keeps that choice open instead of
+            // baking one in through a constraint nobody chose deliberately.
+        });
+
+        modelBuilder.Entity<User>(entity =>
+        {
+            entity.HasKey(u => u.Id);
+            entity.Property(u => u.Email).IsRequired().HasMaxLength(User.MaxEmailLength);
+            entity.Property(u => u.PasswordHash).IsRequired().HasMaxLength(100);
+            entity.Property(u => u.Role).IsRequired().HasMaxLength(20);
+
+            // Unique, so that two accounts cannot claim the same address. The
+            // registration endpoint checks for a duplicate first and answers
+            // 409, but that check and the insert are two separate statements:
+            // two requests arriving together can both pass the check before
+            // either inserts. This index is what actually makes it impossible
+            // rather than merely unlikely - the second insert fails at the
+            // database, which is the only place the race cannot slip through.
+            entity.HasIndex(u => u.Email).IsUnique();
         });
 
         // 2. Added the Collection and CollectionItem configuration

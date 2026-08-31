@@ -20,6 +20,16 @@ export interface Quote {
    * DatePipe accepts the string, so nothing is lost.
    */
   createdAt: string;
+
+  /**
+   * Who created it, or null for a quote that predates accounts existing.
+   *
+   * Published by the API so an admin — who sees everyone's quotes — can tell
+   * which rows are their own. It is not what decides whether the delete button
+   * does anything: the server re-checks ownership on every delete, because a
+   * client deciding what it may do is a client that can decide differently.
+   */
+  ownerId: number | null;
 }
 
 /** Mirrors PagedResult<T>. The count field is totalCount, not total. */

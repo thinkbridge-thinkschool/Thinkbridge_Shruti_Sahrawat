@@ -190,4 +190,154 @@ public class QuoteEndpointsTests
         var fetchedBody = await fetched.Content.ReadFromJsonAsync<QuoteResponse>(TestInfrastructure.Json);
         fetchedBody!.CreatedAt.Should().Be(instant.UtcDateTime);
     }
+
+    // ---- ownership (Day 19) -------------------------------------------------
+    //
+    // Every test above uses host.Client, which CreateFreshHost signs in as an
+    // ordinary user. These are the ones about who may see and delete what, so
+    // they create their own identities explicitly.
+
+    [Fact]
+    public async Task GetQuotes_WithoutAToken_Returns401()
+    {
+        using var host = await TestInfrastructure.CreateFreshHost(_sqlServer);
+
+        var response = await host.AnonymousClient().GetAsync("/api/quotes?page=1&size=10");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task CreateQuote_WithoutAToken_Returns401()
+    {
+        using var host = await TestInfrastructure.CreateFreshHost(_sqlServer);
+
+        var response = await host.AnonymousClient().PostAsJsonAsync(
+            "/api/quotes", new CreateQuoteRequest { Author = "Anon", Text = "Should not be stored." });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    // The owner comes from the token, not the body - CreateQuoteRequest has no
+    // owner field for a client to set. This is what proves the endpoint fills
+    // it in rather than leaving every quote un-owned.
+    [Fact]
+    public async Task CreateQuote_StampsTheCallerAsTheOwner()
+    {
+        using var host = await TestInfrastructure.CreateFreshHost(_sqlServer);
+        var (ada, adaUser) = await host.SignUpAsync("ada@example.com");
+
+        var response = await ada.PostAsJsonAsync(
+            "/api/quotes", new CreateQuoteRequest { Author = "Ada Lovelace", Text = "A valid quote." });
+
+        var body = await response.Content.ReadFromJsonAsync<QuoteResponse>(TestInfrastructure.Json);
+        body!.OwnerId.Should().Be(adaUser.Id);
+    }
+
+    [Fact]
+    public async Task GetQuotes_ForAnOrdinaryUser_ReturnsOnlyTheirOwnQuotes()
+    {
+        using var host = await TestInfrastructure.CreateFreshHost(_sqlServer);
+        var (ada, _) = await host.SignUpAsync("ada@example.com");
+        var (grace, _) = await host.SignUpAsync("grace@example.com");
+
+        await ada.PostAsJsonAsync("/api/quotes", new CreateQuoteRequest { Author = "Ada", Text = "Ada's own quote." });
+        await grace.PostAsJsonAsync("/api/quotes", new CreateQuoteRequest { Author = "Grace", Text = "Grace's own quote." });
+
+        var response = await ada.GetAsync("/api/quotes?page=1&size=10");
+        var page = await response.Content.ReadFromJsonAsync<PagedResult<QuoteResponse>>(TestInfrastructure.Json);
+
+        // TotalCount as well as Items: a listing that filtered the rows but
+        // counted the whole table would page over somebody else's data and
+        // report a total that describes it.
+        page!.TotalCount.Should().Be(1);
+        page.Items.Should().ContainSingle().Which.Text.Should().Be("Ada's own quote.");
+    }
+
+    // 404 rather than 403, deliberately. A 403 would confirm the quote exists,
+    // which turns sequential ids into a way to count how much data other people
+    // have. From outside, "not there" and "not yours" are indistinguishable.
+    [Fact]
+    public async Task GetQuoteById_SomeoneElsesQuote_Returns404()
+    {
+        using var host = await TestInfrastructure.CreateFreshHost(_sqlServer);
+        var (ada, _) = await host.SignUpAsync("ada@example.com");
+        var (grace, _) = await host.SignUpAsync("grace@example.com");
+
+        var created = await grace.PostAsJsonAsync("/api/quotes", new CreateQuoteRequest { Author = "Grace", Text = "Grace's own quote." });
+        var graceQuote = await created.Content.ReadFromJsonAsync<QuoteResponse>(TestInfrastructure.Json);
+
+        var response = await ada.GetAsync($"/api/quotes/{graceQuote!.Id}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task DeleteQuote_SomeoneElsesQuote_Returns404AndLeavesItInPlace()
+    {
+        using var host = await TestInfrastructure.CreateFreshHost(_sqlServer);
+        var (ada, _) = await host.SignUpAsync("ada@example.com");
+        var (grace, _) = await host.SignUpAsync("grace@example.com");
+
+        var created = await grace.PostAsJsonAsync("/api/quotes", new CreateQuoteRequest { Author = "Grace", Text = "Grace's own quote." });
+        var graceQuote = await created.Content.ReadFromJsonAsync<QuoteResponse>(TestInfrastructure.Json);
+
+        var deleteResponse = await ada.DeleteAsync($"/api/quotes/{graceQuote!.Id}");
+
+        deleteResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        // The status code alone would pass even if the row had been deleted and
+        // the endpoint merely lied about it. Grace asking for her own quote is
+        // what proves it is still there.
+        var stillThere = await grace.GetAsync($"/api/quotes/{graceQuote.Id}");
+        stillThere.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task GetQuotes_AsAnAdmin_ReturnsEveryUsersQuotes()
+    {
+        using var host = await TestInfrastructure.CreateFreshHost(_sqlServer, null, "boss@example.com");
+        var (boss, bossUser) = await host.SignUpAsync("boss@example.com");
+        var (ada, _) = await host.SignUpAsync("ada@example.com");
+
+        bossUser.Role.Should().Be(Roles.Admin, "the address was listed in Auth:AdminEmails");
+
+        await ada.PostAsJsonAsync("/api/quotes", new CreateQuoteRequest { Author = "Ada", Text = "Ada's own quote." });
+        await boss.PostAsJsonAsync("/api/quotes", new CreateQuoteRequest { Author = "Boss", Text = "The admin's own quote." });
+
+        var response = await boss.GetAsync("/api/quotes?page=1&size=10");
+        var page = await response.Content.ReadFromJsonAsync<PagedResult<QuoteResponse>>(TestInfrastructure.Json);
+
+        page!.Items.Select(q => q.Text).Should().Contain(new[] { "Ada's own quote.", "The admin's own quote." });
+    }
+
+    [Fact]
+    public async Task DeleteQuote_AsAnAdmin_CanDeleteSomeoneElsesQuote()
+    {
+        using var host = await TestInfrastructure.CreateFreshHost(_sqlServer, null, "boss@example.com");
+        var (boss, _) = await host.SignUpAsync("boss@example.com");
+        var (ada, _) = await host.SignUpAsync("ada@example.com");
+
+        var created = await ada.PostAsJsonAsync("/api/quotes", new CreateQuoteRequest { Author = "Ada", Text = "Ada's own quote." });
+        var adaQuote = await created.Content.ReadFromJsonAsync<QuoteResponse>(TestInfrastructure.Json);
+
+        var deleteResponse = await boss.DeleteAsync($"/api/quotes/{adaQuote!.Id}");
+
+        deleteResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var adaLooksForIt = await ada.GetAsync($"/api/quotes/{adaQuote.Id}");
+        adaLooksForIt.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    // The role is decided by the server from configuration. This is the test
+    // that would fail if someone ever added a role field to RegisterRequest.
+    [Fact]
+    public async Task Register_ForAnAddressNotListedAsAdmin_CreatesAnOrdinaryUser()
+    {
+        using var host = await TestInfrastructure.CreateFreshHost(_sqlServer, null, "boss@example.com");
+
+        var (_, user) = await host.SignUpAsync("someone-else@example.com");
+
+        user.Role.Should().Be(Roles.User);
+    }
 }

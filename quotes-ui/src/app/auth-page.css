@@ -1,0 +1,136 @@
+/* Shared by LoginPage and RegisterPage. The two screens are the same form
+   with different copy, and a second stylesheet would be the same rules with
+   a different chance of drifting. */
+
+:host {
+  display: block;
+  max-width: 26rem;
+  margin: 3.5rem auto;
+  padding: 0 1.25rem;
+  color: var(--ink);
+}
+
+h1 {
+  margin: 0 0 0.4rem;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.lede {
+  margin: 0 0 1.75rem;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 1.1rem;
+}
+
+label {
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+input {
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border, #d7d7e0);
+  border-radius: var(--radius-sm, 8px);
+  font: inherit;
+  color: inherit;
+  background: var(--surface, white);
+}
+
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Colour is not the only signal: the field also carries aria-invalid, and
+   the message below it says what is wrong in words. WCAG 1.4.1 - a border
+   that turns red communicates nothing to a screen reader, and not much to
+   the ~8% of men with a red-green colour deficiency either. */
+input[aria-invalid='true'] {
+  border-color: var(--danger, #b3261e);
+}
+
+.hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.error {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--danger, #b3261e);
+}
+
+.error span {
+  display: block;
+}
+
+.banner {
+  margin: 1rem 0 0;
+  padding: 0.7rem 0.85rem;
+  border-radius: var(--radius-sm, 8px);
+  background: var(--danger-surface, #fdeceb);
+  line-height: 1.5;
+}
+
+/* Present in the DOM even when empty, so assistive tech is already
+   observing it when it gains text - see the comment in the template. An
+   empty box with padding would be a visible artefact, so it collapses. */
+.banner[hidden] {
+  display: none;
+}
+
+button[type='submit'] {
+  width: 100%;
+  margin-top: 0.4rem;
+  padding: 0.68rem 1.5rem;
+  border: none;
+  border-radius: var(--radius-sm, 8px);
+  background: var(--accent);
+  color: var(--on-accent, white);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition:
+    background-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+
+button[type='submit']:hover:not(:disabled) {
+  background: var(--accent-strong);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+button[type='submit']:disabled {
+  opacity: 0.65;
+  cursor: progress;
+  transform: none;
+}
+
+button[type='submit']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.alt {
+  margin: 1.5rem 0 0;
+  text-align: center;
+  font-size: 0.92rem;
+  color: var(--muted);
+}
+
+.alt a {
+  color: var(--accent);
+  font-weight: 600;
+}
