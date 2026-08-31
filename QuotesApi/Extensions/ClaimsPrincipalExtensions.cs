@@ -39,29 +39,18 @@ public static class ClaimsPrincipalExtensions
         => principal.IsInRole(Roles.Admin);
 
     /// <summary>
-    /// Which owner id to filter a listing by: null for an admin, meaning "do
-    /// not filter", and the caller's own id for everyone else.
-    /// </summary>
-    /// <param name="userId">
-    /// The caller's already-resolved id. Taken as a parameter rather than read
-    /// from the principal inside this method on purpose: reading it here would
-    /// mean a malformed token produced a null id, which this method would then
-    /// return as "do not filter" - showing every quote in the database to
-    /// whoever presented it. Requiring the caller to resolve the id first
-    /// makes that path impossible to reach by accident.
-    /// </param>
-    public static int? OwnerFilterFor(this ClaimsPrincipal principal, int userId)
-        => principal.IsAdmin() ? null : userId;
-
-    /// <summary>
-    /// Whether this caller may read or delete a quote owned by
+    /// Whether this caller may delete a quote owned by
     /// <paramref name="ownerId"/>.
     /// </summary>
     /// <remarks>
-    /// A quote with no owner is one created before accounts existed. Admin
-    /// only: handing legacy rows to whichever user asked first would be
-    /// inventing an owner, and hiding them from everyone would quietly orphan
-    /// data that is still in the database.
+    /// Reading is open to every signed-in user - GET /api/quotes and
+    /// GET /api/quotes/{id} show everyone's quotes to everyone, not just an
+    /// admin's own. This method is what still draws a line, and it draws it
+    /// only around deleting: your own rows, or (for an admin) anyone's,
+    /// including the un-owned rows from before accounts existed. Handing
+    /// those legacy rows to whichever ordinary user asked first would be
+    /// inventing an owner the data never had, so an ordinary user is refused
+    /// even though the quote is now visible to them.
     /// </remarks>
     public static bool CanAccessQuoteOwnedBy(this ClaimsPrincipal principal, int? ownerId, int userId)
         => principal.IsAdmin() || (ownerId is not null && ownerId == userId);

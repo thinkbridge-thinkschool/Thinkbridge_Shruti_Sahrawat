@@ -15,9 +15,11 @@ public class QuoteRepository : IQuoteRepository
         _logger = logger;
     }
 
-    public async Task<(IReadOnlyList<Quote> Items, int TotalCount)> GetPagedAsync(int page, int size, int? ownerId, CancellationToken ct)
+    public async Task<(IReadOnlyList<Quote> Items, int TotalCount)> GetPagedAsync(int page, int size, int? ownerId, string? authorFilter, CancellationToken ct)
     {
-        _logger.LogInformation("Fetching quotes page {Page} size {Size} owner {OwnerId}", page, size, ownerId);
+        _logger.LogInformation(
+            "Fetching quotes page {Page} size {Size} owner {OwnerId} author {AuthorFilter}",
+            page, size, ownerId, authorFilter);
 
         // One query shape, built once and used for both the count and the page,
         // so the two can never disagree about which rows they are describing.
@@ -27,6 +29,19 @@ public class QuoteRepository : IQuoteRepository
         if (ownerId is not null)
         {
             query = query.Where(q => q.OwnerId == ownerId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(authorFilter))
+        {
+            // ToLower() on both sides rather than EF.Functions.Like or
+            // string.Contains(x, StringComparison.OrdinalIgnoreCase): the
+            // former only translates on SQL Server, the latter is provider-
+            // specific too, and this app runs on SQLite locally and SQL
+            // Server in integration tests - a filter that only worked
+            // against one of them would look fine on a laptop and 500 the
+            // first time it hit the other.
+            var needle = authorFilter.Trim().ToLower();
+            query = query.Where(q => q.Author.ToLower().Contains(needle));
         }
 
         var totalCount = await query.CountAsync(ct);

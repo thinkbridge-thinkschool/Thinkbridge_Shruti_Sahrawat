@@ -235,7 +235,7 @@ public class QuoteEndpointsTests
     }
 
     [Fact]
-    public async Task GetQuotes_ForAnOrdinaryUser_ReturnsOnlyTheirOwnQuotes()
+    public async Task GetQuotes_ForAnOrdinaryUser_ReturnsEveryonesQuotesNotJustTheirOwn()
     {
         using var host = await TestInfrastructure.CreateFreshHost(_sqlServer);
         var (ada, _) = await host.SignUpAsync("ada@example.com");
@@ -247,18 +247,57 @@ public class QuoteEndpointsTests
         var response = await ada.GetAsync("/api/quotes?page=1&size=10");
         var page = await response.Content.ReadFromJsonAsync<PagedResult<QuoteResponse>>(TestInfrastructure.Json);
 
-        // TotalCount as well as Items: a listing that filtered the rows but
-        // counted the whole table would page over somebody else's data and
-        // report a total that describes it.
-        page!.TotalCount.Should().Be(1);
-        page.Items.Should().ContainSingle().Which.Text.Should().Be("Ada's own quote.");
+        // Reading is open to everyone - only deleting is restricted to your
+        // own rows (see DeleteQuote_SomeoneElsesQuote_Returns403AndLeavesItInPlace
+        // below). TotalCount as well as Items: a listing that filtered the
+        // rows but counted the whole table would page over a subset and
+        // report a total that describes something else.
+        page!.TotalCount.Should().Be(2);
+        page.Items.Select(q => q.Text).Should().Contain(new[] { "Ada's own quote.", "Grace's own quote." });
     }
 
-    // 404 rather than 403, deliberately. A 403 would confirm the quote exists,
-    // which turns sequential ids into a way to count how much data other people
-    // have. From outside, "not there" and "not yours" are indistinguishable.
+    // The filter used to be applied in the browser, over whatever ten rows
+    // the current page held - which meant a match sitting on a page nobody
+    // had fetched yet was invisible no matter what was typed. It has to be
+    // proven here, against a page smaller than the whole collection, that
+    // the match is still found.
     [Fact]
-    public async Task GetQuoteById_SomeoneElsesQuote_Returns404()
+    public async Task GetQuotes_WithAnAuthorFilter_SearchesTheWholeCollectionNotJustTheCurrentPage()
+    {
+        using var host = await TestInfrastructure.CreateFreshHost(_sqlServer);
+
+        await host.Client.PostAsJsonAsync("/api/quotes", new CreateQuoteRequest { Author = "Grace Hopper", Text = "Quote one." });
+        await host.Client.PostAsJsonAsync("/api/quotes", new CreateQuoteRequest { Author = "Alan Turing", Text = "Quote two." });
+        await host.Client.PostAsJsonAsync("/api/quotes", new CreateQuoteRequest { Author = "Ada Lovelace", Text = "Quote three." });
+
+        // size=1 forces the match onto a page other than page 1 if the
+        // filter were merely narrowing whatever page happened to load.
+        var response = await host.Client.GetAsync("/api/quotes?page=1&size=1&author=hopper");
+        var page = await response.Content.ReadFromJsonAsync<PagedResult<QuoteResponse>>(TestInfrastructure.Json);
+
+        page!.TotalCount.Should().Be(1);
+        page.Items.Should().ContainSingle().Which.Author.Should().Be("Grace Hopper");
+    }
+
+    [Fact]
+    public async Task GetQuotes_WithAnAuthorFilterMatchingNoOne_ReturnsAnEmptyPageRatherThanAnError()
+    {
+        using var host = await TestInfrastructure.CreateFreshHost(_sqlServer);
+
+        await host.Client.PostAsJsonAsync("/api/quotes", new CreateQuoteRequest { Author = "Grace Hopper", Text = "Quote one." });
+
+        var response = await host.Client.GetAsync("/api/quotes?page=1&size=10&author=nobody-by-this-name");
+        var page = await response.Content.ReadFromJsonAsync<PagedResult<QuoteResponse>>(TestInfrastructure.Json);
+
+        page!.TotalCount.Should().Be(0);
+        page.Items.Should().BeEmpty();
+    }
+
+    // Any signed-in user may look, including at a quote someone else added -
+    // the list endpoint already shows it to them, so a detail page that then
+    // 404'd would just be the two endpoints disagreeing.
+    [Fact]
+    public async Task GetQuoteById_SomeoneElsesQuote_ReturnsOk()
     {
         using var host = await TestInfrastructure.CreateFreshHost(_sqlServer);
         var (ada, _) = await host.SignUpAsync("ada@example.com");
@@ -269,11 +308,19 @@ public class QuoteEndpointsTests
 
         var response = await ada.GetAsync($"/api/quotes/{graceQuote!.Id}");
 
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var fetched = await response.Content.ReadFromJsonAsync<QuoteResponse>(TestInfrastructure.Json);
+        fetched!.Text.Should().Be("Grace's own quote.");
     }
 
+    // 403, not 404. Unlike GetQuoteById above, deleting still draws a line -
+    // just not the same one as visibility. And unlike the old design, there
+    // is no existence to protect by staying vague here: Ada can already see
+    // this quote is real via the GET this test proves works, so a 403 that
+    // says "yes, and you can't touch it" leaks nothing a plain look didn't
+    // already tell her.
     [Fact]
-    public async Task DeleteQuote_SomeoneElsesQuote_Returns404AndLeavesItInPlace()
+    public async Task DeleteQuote_SomeoneElsesQuote_Returns403AndLeavesItInPlace()
     {
         using var host = await TestInfrastructure.CreateFreshHost(_sqlServer);
         var (ada, _) = await host.SignUpAsync("ada@example.com");
@@ -284,7 +331,7 @@ public class QuoteEndpointsTests
 
         var deleteResponse = await ada.DeleteAsync($"/api/quotes/{graceQuote!.Id}");
 
-        deleteResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        deleteResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden);
 
         // The status code alone would pass even if the row had been deleted and
         // the endpoint merely lied about it. Grace asking for her own quote is

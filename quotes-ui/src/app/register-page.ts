@@ -65,6 +65,14 @@ import { atLeast, looksLikeEmail, notOnlyWhitespace } from './auth-validators';
       </div>
 
       <button type="submit" [disabled]="registerForm().submitting()">
+        @if (!registerForm().submitting()) {
+          <svg class="icon" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <circle cx="9" cy="8" r="4"></circle>
+            <path d="M2 21c0-4 3.5-6.5 7-6.5s7 2.5 7 6.5"></path>
+            <line x1="19" y1="8" x2="19" y2="14"></line>
+            <line x1="16" y1="11" x2="22" y2="11"></line>
+          </svg>
+        }
         {{ registerForm().submitting() ? 'Creating account…' : 'Create account' }}
       </button>
 

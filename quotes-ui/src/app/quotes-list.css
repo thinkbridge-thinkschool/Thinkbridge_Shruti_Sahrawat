@@ -54,6 +54,29 @@ code {
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
+/* Wraps the search icon and the filter input together so the icon can sit
+   inside the field as an absolute overlay rather than pushing layout
+   around — the input keeps its normal box, just with extra left padding
+   to leave room for the icon on top of it. */
+.input-icon {
+  position: relative;
+  display: block;
+}
+
+.input-icon > .icon {
+  position: absolute;
+  left: 0.7rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.input-icon input {
+  width: 100%;
+  padding-left: 2.1rem;
+}
+
 .controls input::placeholder {
   color: var(--muted);
 }
@@ -171,14 +194,23 @@ code {
   position: absolute;
   top: 0.6rem;
   right: 0.6rem;
-  padding: 0.3rem 0.6rem;
-  font-size: 0.78rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
   color: var(--bad);
   border-color: transparent;
   background: var(--surface);
   box-shadow: none;
   opacity: 0;
   transition: opacity 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.quotes li .delete .icon {
+  width: 1.1em;
+  height: 1.1em;
 }
 
 /* Visible on hover/focus-within so the card reads cleanly at rest, but never
@@ -225,6 +257,9 @@ code {
 
 .add-link {
   align-self: end;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
   padding: 0.55rem 1.1rem;
   border: 1px solid var(--accent);
   border-radius: var(--radius-sm);
@@ -394,6 +429,17 @@ button:focus-visible {
   color: var(--muted);
 }
 
+.account .who {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.account .who > .icon {
+  color: var(--accent);
+}
+
 .account .who strong {
   color: var(--ink);
   font-weight: 600;
@@ -403,9 +449,11 @@ button:focus-visible {
 }
 
 .role-badge {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
   margin-left: 0.4rem;
-  padding: 0.05rem 0.4rem;
+  padding: 0.05rem 0.45rem;
   border-radius: 999px;
   background: var(--accent);
   color: var(--on-accent, white);
@@ -416,10 +464,18 @@ button:focus-visible {
   vertical-align: 0.05em;
 }
 
+.role-badge .icon {
+  width: 0.85em;
+  height: 0.85em;
+}
+
 .sign-out {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   padding: 0.35rem 0.8rem;
-  border: 1px solid var(--border, #d7d7e0);
-  border-radius: var(--radius-sm, 8px);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-sm);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -442,7 +498,7 @@ button:focus-visible {
 .owner {
   padding: 0.05rem 0.4rem;
   border-radius: 999px;
-  background: var(--surface-muted, #eeeef4);
+  background: var(--surface-sunken);
   font-size: 0.75rem;
   color: var(--muted);
 }

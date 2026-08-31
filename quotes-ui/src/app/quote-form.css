@@ -118,6 +118,18 @@ textarea[aria-invalid='true']:focus-visible {
   gap: 0.6rem;
 }
 
+.success-headline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 700;
+  color: var(--accent-strong);
+}
+
+.success-detail {
+  color: var(--ink-soft);
+}
+
 /*
  * The banner and success regions are permanently in the DOM (quote-form.ts
  * keeps them mounted and toggles [hidden] instead of *ngIf/@if, precisely so
@@ -151,6 +163,9 @@ textarea[aria-invalid='true']:focus-visible {
 }
 
 button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
   font: inherit;
   padding: 0.55rem 1.05rem;
   border: 1px solid var(--rule-strong);

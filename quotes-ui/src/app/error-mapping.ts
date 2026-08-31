@@ -30,6 +30,7 @@ export const MAP_ERRORS = new HttpContextToken<boolean>(() => false);
  */
 export type AppError =
   | { kind: 'validation'; statusCode: 400; message: string; fieldErrors: Record<string, string[]>; cause: unknown }
+  | { kind: 'forbidden'; statusCode: 403; message: string; cause: unknown }
   | { kind: 'notFound'; statusCode: 404; message: string; cause: unknown }
   | { kind: 'client'; statusCode: number; message: string; cause: unknown }
   | { kind: 'server'; statusCode: number; message: string; cause: unknown }
@@ -51,6 +52,13 @@ export type AppError =
  *   on the 400. Treating every 4xx as "the same shape, different status"
  *   would read `problem.errors` on a 404 and get `undefined` — which this
  *   function treats as "no field errors", not as a parse failure.
+ * - `DELETE /api/quotes/{id}` on someone else's quote returns
+ *   `Results.Problem(title, detail, statusCode: 403)` — same `detail` field
+ *   as the 404 case, different status. Every signed-in user can already see
+ *   this quote via GET, so unlike the 404 case above there is no existence
+ *   to protect by staying vague — the point of the 403 is exactly to say
+ *   "that's real, you just can't touch it", distinct from "there is nothing
+ *   here".
  */
 function toAppError(error: unknown): AppError {
   if (!(error instanceof HttpErrorResponse)) {
@@ -79,6 +87,16 @@ function toAppError(error: unknown): AppError {
       statusCode: 400,
       message: 'Please fix the highlighted fields and try again.',
       fieldErrors: problem?.errors ?? {},
+      cause: error,
+    };
+  }
+
+  if (error.status === 403) {
+    const problem = error.error as { detail?: string } | null;
+    return {
+      kind: 'forbidden',
+      statusCode: 403,
+      message: problem?.detail ?? 'You do not have permission to do that.',
       cause: error,
     };
   }

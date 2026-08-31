@@ -19,7 +19,7 @@ public static class EndpointExtensions
         // and nothing fails, so nothing tells you.
         var group = app.MapGroup("/api/quotes").WithTags("Quotes").RequireAuthorization();
 
-        group.MapGet("/", async (int page, int size, ClaimsPrincipal principal, IQuoteRepository repo, CancellationToken ct) =>
+        group.MapGet("/", async (int page, int size, string? author, ClaimsPrincipal principal, IQuoteRepository repo, CancellationToken ct) =>
         {
             var userId = principal.UserId();
             if (userId is null) return Results.Unauthorized();
@@ -27,12 +27,12 @@ public static class EndpointExtensions
             page = page <= 0 ? 1 : page;
             size = size <= 0 ? 10 : Math.Min(size, 100);
 
-            // An admin gets no filter and therefore sees everything, including
-            // the un-owned rows from before accounts existed. Everyone else
-            // sees exactly their own.
-            var ownerFilter = principal.OwnerFilterFor(userId.Value);
-
-            var (items, total) = await repo.GetPagedAsync(page, size, ownerFilter, ct);
+            // No owner filter for anyone, admin or not: every signed-in user
+            // can see every quote, including the un-owned rows from before
+            // accounts existed. Ownership only decides who may delete a row
+            // (see CanAccessQuoteOwnedBy on the DELETE endpoint below) - it
+            // has never had anything to do with who may look.
+            var (items, total) = await repo.GetPagedAsync(page, size, ownerId: null, author, ct);
             var result = new PagedResult<QuoteResponse>(items.Select(QuoteResponse.FromEntity).ToList(), page, size, total);
             return Results.Ok(result);
         });
@@ -60,13 +60,12 @@ public static class EndpointExtensions
 
             var quote = await repo.GetByIdAsync(id, ct);
 
-            // 404 for "not yours", not 403.
-            //
-            // 403 would confirm the quote exists, which turns /api/quotes/1,
-            // /api/quotes/2, /api/quotes/3 into a way to count how much data
-            // other people have and where the gaps are. From outside, "not
-            // there" and "not yours" are deliberately indistinguishable.
-            return quote is null || !principal.CanAccessQuoteOwnedBy(quote.OwnerId, userId.Value)
+            // No ownership check here any more - the list endpoint already
+            // hands every signed-in user every quote, so gating the detail
+            // view by ownership would only mean the two disagreed: a card
+            // in the list linking to a page that then 404s. 404 still means
+            // exactly one thing now - the id does not exist.
+            return quote is null
                 ? Results.NotFound(new ProblemDetails { Title = "Quote not found", Status = 404, Detail = $"No quote with id {id}." })
                 : Results.Ok(QuoteResponse.FromEntity(quote));
         });
@@ -82,9 +81,26 @@ public static class EndpointExtensions
             // the caller fully controls.
             var quote = await repo.GetByIdAsync(id, ct);
 
-            if (quote is null || !principal.CanAccessQuoteOwnedBy(quote.OwnerId, userId.Value))
+            if (quote is null)
             {
                 return Results.NotFound(new ProblemDetails { Title = "Quote not found", Status = 404, Detail = $"No quote with id {id}." });
+            }
+
+            // 403, not 404, for "exists but isn't yours" - unlike the GET
+            // endpoint above, this one used to hide that distinction on
+            // purpose, because confirming a quote existed to someone who
+            // could not otherwise see it would leak information. That
+            // reasoning no longer applies: every signed-in user can already
+            // see this quote via GET /api/quotes or GET /api/quotes/{id}, so
+            // there is nothing left to protect by pretending it is not
+            // there, and a real 403 lets the client tell "you can't do that"
+            // apart from "nothing to do".
+            if (!principal.CanAccessQuoteOwnedBy(quote.OwnerId, userId.Value))
+            {
+                return Results.Problem(
+                    title: "Not your quote",
+                    detail: "You can only delete quotes you added yourself.",
+                    statusCode: StatusCodes.Status403Forbidden);
             }
 
             var deleted = await repo.DeleteAsync(id, ct);

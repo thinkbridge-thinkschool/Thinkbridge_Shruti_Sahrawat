@@ -52,18 +52,6 @@ public class ClaimsPrincipalExtensionsTests
     }
 
     [Fact]
-    public void OwnerFilterFor_AnOrdinaryUser_FiltersToTheirOwnRows()
-    {
-        User(42).OwnerFilterFor(42).Should().Be(42);
-    }
-
-    [Fact]
-    public void OwnerFilterFor_AnAdmin_AppliesNoFilter()
-    {
-        User(1, Roles.Admin).OwnerFilterFor(1).Should().BeNull();
-    }
-
-    [Fact]
     public void CanAccessQuoteOwnedBy_TheirOwnQuote_IsAllowed()
     {
         User(42).CanAccessQuoteOwnedBy(ownerId: 42, userId: 42).Should().BeTrue();

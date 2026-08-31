@@ -84,6 +84,12 @@ import { QuotesStore } from './quotes-store';
 
       <div class="actions">
         <button type="submit" [disabled]="quoteForm().submitting()">
+          @if (!quoteForm().submitting()) {
+            <svg class="icon" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+          }
           {{ quoteForm().submitting() ? 'Saving…' : 'Add quote' }}
         </button>
       </div>
@@ -101,7 +107,14 @@ import { QuotesStore } from './quotes-store';
 
       <p class="success" role="status" [hidden]="!created()">
         @if (created(); as quote) {
-          Added “{{ quote.text }}” — {{ quote.author }}.
+          <span class="success-headline">
+            <svg class="icon" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+              <circle cx="12" cy="12" r="9"></circle>
+              <polyline points="8 12.5 11 15.5 16 9"></polyline>
+            </svg>
+            Quote added.
+          </span>
+          <span class="success-detail">“{{ quote.text }}” — {{ quote.author }}</span>
           <button type="button" (click)="writeAnother()">Write another</button>
           <a [routerLink]="['/quotes', quote.id]">View it</a>
         }

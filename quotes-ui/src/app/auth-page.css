@@ -6,7 +6,11 @@
   display: block;
   max-width: 26rem;
   margin: 3.5rem auto;
-  padding: 0 1.25rem;
+  padding: 2rem 1.75rem 2.25rem;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
   color: var(--ink);
 }
 
@@ -37,11 +41,11 @@ label {
 
 input {
   padding: 0.6rem 0.7rem;
-  border: 1px solid var(--border, #d7d7e0);
-  border-radius: var(--radius-sm, 8px);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-sm);
   font: inherit;
   color: inherit;
-  background: var(--surface, white);
+  background: var(--surface-sunken);
 }
 
 input:focus-visible {
@@ -54,7 +58,7 @@ input:focus-visible {
    that turns red communicates nothing to a screen reader, and not much to
    the ~8% of men with a red-green colour deficiency either. */
 input[aria-invalid='true'] {
-  border-color: var(--danger, #b3261e);
+  border-color: var(--bad);
 }
 
 .hint {
@@ -66,7 +70,7 @@ input[aria-invalid='true'] {
 .error {
   margin: 0;
   font-size: 0.85rem;
-  color: var(--danger, #b3261e);
+  color: var(--bad);
 }
 
 .error span {
@@ -76,8 +80,8 @@ input[aria-invalid='true'] {
 .banner {
   margin: 1rem 0 0;
   padding: 0.7rem 0.85rem;
-  border-radius: var(--radius-sm, 8px);
-  background: var(--danger-surface, #fdeceb);
+  border-radius: var(--radius-sm);
+  background: var(--bad-soft);
   line-height: 1.5;
 }
 
@@ -90,10 +94,14 @@ input[aria-invalid='true'] {
 
 button[type='submit'] {
   width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
   margin-top: 0.4rem;
   padding: 0.68rem 1.5rem;
   border: none;
-  border-radius: var(--radius-sm, 8px);
+  border-radius: var(--radius-sm);
   background: var(--accent);
   color: var(--on-accent, white);
   font: inherit;

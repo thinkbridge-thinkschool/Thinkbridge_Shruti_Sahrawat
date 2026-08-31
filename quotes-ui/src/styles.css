@@ -1,39 +1,41 @@
 /*
  * Design tokens, shared by every component via `var(--…)`.
  *
- * Single dark theme, applied unconditionally rather than driven by
+ * Single light theme, applied unconditionally rather than driven by
  * `prefers-color-scheme` — every component already reads exclusively through
  * these tokens (nothing in the app hardcodes a color), so retheming here is
- * enough to reskin the whole app with zero per-component changes.
- * `color-scheme: dark` is also what tells the browser's own UI (scrollbars,
- * form controls) to render dark. `--bg` gets an explicit value and is set on
- * <body> below — a page with no background color set is transparent, which
- * is exactly how the old dark mode went unreadable: text turned light, the
- * page underneath stayed whatever the browser chrome happened to be, and
- * nothing composited.
+ * enough to reskin the whole app with zero per-component changes. That is
+ * the property this file relies on: it was originally written for a dark
+ * palette, and switching to this white-and-green one only ever touched this
+ * one file.
+ * `color-scheme: light` is also what tells the browser's own UI (scrollbars,
+ * form controls) to render light. `--bg` gets an explicit value and is set
+ * on <body> below — a page with no background color set is transparent,
+ * which is how a mismatched color-scheme goes unreadable: the browser
+ * chrome paints one way, the page assumes another, and nothing composited.
  */
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 
-  --bg: #0b0a10;
-  --surface: #17151f;
-  --surface-sunken: #1f1c29;
-  --ink: #f5f3fa;
-  --ink-soft: #cbc4dc;
-  --muted: #8d84a3;
-  --rule: #2b2736;
-  --rule-strong: #3e394f;
-  --accent: #b794f6;
-  --accent-soft: rgba(183, 148, 246, 0.14);
-  --accent-strong: #d3b8ff;
-  --bad: #ff7a7a;
-  --bad-soft: rgba(255, 122, 122, 0.14);
+  --bg: #ffffff;
+  --surface: #f2faf3;
+  --surface-sunken: #e6f4e8;
+  --ink: #16261b;
+  --ink-soft: #3f5346;
+  --muted: #6d8074;
+  --rule: #d7ead9;
+  --rule-strong: #a9cdae;
+  --accent: #3f9142;
+  --accent-soft: rgba(63, 145, 66, 0.12);
+  --accent-strong: #2c6e30;
+  --bad: #c0362c;
+  --bad-soft: rgba(192, 54, 44, 0.09);
 
-  /* Warm accent used sparingly — the quote-mark glyph, nothing interactive —
-     so it reads as a design flourish rather than competing with --accent for
-     "this is clickable". */
-  --highlight: #f2b84b;
+  /* A lighter, yellower green than --accent, used sparingly — the
+     quote-mark glyph, nothing interactive — so it reads as a design
+     flourish rather than competing with --accent for "this is clickable". */
+  --highlight: #9ccc65;
 
   --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-quote: 'Source Serif 4', Georgia, 'Times New Roman', serif;
@@ -43,13 +45,14 @@
   --radius-md: 10px;
   --radius-lg: 14px;
 
-  --on-accent: #17101f;
+  --on-accent: #ffffff;
 
-  /* Shadows read as almost nothing on a near-black page, so depth comes from
-     a faint light edge plus a tinted glow on hover rather than a dark drop
-     shadow — the thing a shadow normally darkens is already this dark. */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.03);
-  --shadow-md: 0 16px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(183, 148, 246, 0.10);
+  /* Shadows read as almost nothing on a white page unless they are this
+     soft: depth comes from a low-opacity, green-tinted shadow rather than
+     the harsher black drop-shadow a dark theme can get away with, so a
+     card lifts off the page without looking like it is sitting in fog. */
+  --shadow-sm: 0 1px 2px rgba(22, 38, 27, 0.08), 0 0 0 1px rgba(22, 38, 27, 0.04);
+  --shadow-md: 0 16px 32px rgba(22, 38, 27, 0.12), 0 0 0 1px rgba(63, 145, 66, 0.10);
   --shadow-focus-accent: 0 0 0 4px var(--accent-soft);
 }
 
@@ -58,7 +61,7 @@
 }
 
 html {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
@@ -77,6 +80,22 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+/*
+ * Small inline icons throughout the app (search, add, delete, sign-out,
+ * success). One rule here rather than repeating it next to every <svg>:
+ * `currentColor` means an icon always matches the text color it sits
+ * beside, so it never needs its own color token and never drifts from the
+ * surrounding text when a button's state (hover, disabled) changes it.
+ */
+.icon {
+  width: 1em;
+  height: 1em;
+  flex-shrink: 0;
+  stroke: currentColor;
+  fill: none;
+  vertical-align: -0.125em;
 }
 
 /*

@@ -20,16 +20,25 @@ export type ListState = 'loading' | 'error' | 'no-data' | 'no-matches' | 'ready'
 const EMPTY_IDS: ReadonlySet<number> = new Set<number>();
 
 /**
+ * How long the author search waits after the last keystroke before it asks
+ * the server. Matches the shape of retry-backoff.ts's BASE_DELAY_MS: a named
+ * constant a test can advance fake timers by by name, rather than a magic
+ * number repeated in both places that has to be kept in sync by hand.
+ */
+export const AUTHOR_FILTER_DEBOUNCE_MS = 300;
+
+/**
  * The store for the quotes-list feature.
  *
  * Signals + a service, no store library. The organising rule, which the old
  * QuotesApi/QuotesList split followed by accident rather than by design:
  *
- *   - **Query state** changes the request. `page` and `size` are in the URL,
- *     so writing them causes a fetch.
- *   - **View state** never reaches the server. `authorFilter` narrows rows
- *     already in hand — it used to live in QuotesList, and moving it here
- *     does not change that: a keystroke still triggers no HTTP call.
+ *   - **Query state** changes the request. `page`, `size` and
+ *     `committedAuthorFilter` are all in the URL, so writing any of them
+ *     causes a fetch. `authorFilter` itself is the one exception worth
+ *     naming: it is display state for the input box, debounced into
+ *     `committedAuthorFilter` before it becomes a request — see the author
+ *     search section below for why.
  *   - **Server state** is owned by `httpResource`, not copied out of it.
  *   - **Everything else is derived.** `visibleQuotes`, `totalCount`,
  *     `totalPages`, `listState` are all `computed`. If a value can be
@@ -47,20 +56,43 @@ export class QuotesStore {
   readonly page = signal(MIN_PAGE);
   readonly size = signal(DEFAULT_SIZE);
 
-  // ---- view state: never reaches the server ----------------------------
+  // ---- author search -----------------------------------------------------
+  //
+  // Two signals, not one, because typing and searching are different
+  // events. `authorFilter` is what the input shows and updates on every
+  // keystroke; `committedAuthorFilter` is what the server was actually
+  // asked for, and only catches up AUTHOR_FILTER_DEBOUNCE_MS after typing
+  // pauses. Without the split, a fast typist fires one HTTP request per
+  // character - ten requests for "iris", nine of them thrown away before
+  // they land.
+  //
+  // This used to be view state that never left the browser: it narrowed
+  // whatever ten rows the current page happened to hold, and a match sitting
+  // on page 400 of 1,000 was invisible no matter what was typed. It is query
+  // state now, on purpose - the same category as page() and size() - because
+  // "search" has to mean the whole collection, not the one page in hand.
 
   readonly authorFilter = signal('');
+  private readonly committedAuthorFilter = signal('');
+  private authorFilterTimer: ReturnType<typeof setTimeout> | undefined;
 
   // ---- server state ----------------------------------------------------
 
   /**
-   * Re-issues whenever page() or size() changes, cancelling the in-flight
-   * request first. That is why there is no subscribe, no teardown, and no
-   * "an older response arrived after a newer one" race to reason about.
+   * Re-issues whenever page(), size() or committedAuthorFilter() changes,
+   * cancelling the in-flight request first. That is why there is no
+   * subscribe, no teardown, and no "an older response arrived after a newer
+   * one" race to reason about.
    */
-  private readonly resource = httpResource<PagedResult<Quote>>(
-    () => `/api/quotes?page=${this.page()}&size=${this.size()}`,
-  );
+  private readonly resource = httpResource<PagedResult<Quote>>(() => {
+    const params = new URLSearchParams({
+      page: String(this.page()),
+      size: String(this.size()),
+    });
+    const author = this.committedAuthorFilter().trim();
+    if (author) params.set('author', author);
+    return `/api/quotes?${params.toString()}`;
+  });
 
   // ---- optimistic mutation state ---------------------------------------
 
@@ -115,12 +147,15 @@ export class QuotesStore {
     return this.serverItems().filter((q) => !removed.has(q.id));
   });
 
-  /** Derived from two signals: the rows present, and the filter text. */
-  readonly visibleQuotes = computed<Quote[]>(() => {
-    const term = this.authorFilter().trim().toLowerCase();
-    const items = this.presentItems();
-    return term ? items.filter((q) => q.author.toLowerCase().includes(term)) : items;
-  });
+  /**
+   * The rows to render. The author search now happens server-side (see
+   * `resource` above), so this is presentItems() by another name rather
+   * than a second, client-side pass over them - kept as its own computed
+   * because the template and the tests both already read `visibleQuotes`,
+   * and "what's on screen" is a clearer name for a template to depend on
+   * than "what survived the optimistic-delete mask".
+   */
+  readonly visibleQuotes = computed<Quote[]>(() => this.presentItems());
 
   /**
    * The collection size, held across refetches and adjusted for optimistic
@@ -175,17 +210,31 @@ export class QuotesStore {
   readonly listState = computed<ListState>(() => {
     if (this.resource.isLoading()) return 'loading';
     if (this.resource.error()) return 'error';
-    if (this.totalOnPage() === 0) return 'no-data';
-    if (this.visibleQuotes().length === 0) return 'no-matches';
-    return 'ready';
+    if (this.totalOnPage() > 0) return 'ready';
+    // Distinguishing these two needs the *committed* filter, not
+    // authorFilter() itself: mid-debounce, authorFilter() can already show
+    // the next character typed while this response still describes the
+    // previous (or no) search. Reading the committed value keeps the
+    // empty-state message in sync with the request that actually produced it.
+    return this.committedAuthorFilter().trim() ? 'no-matches' : 'no-data';
   });
 
   // ---- intents ---------------------------------------------------------
 
   setAuthorFilter(value: string): void {
     this.authorFilter.set(value);
-    // Page deliberately left alone: the filter searches the current page
-    // only, and resetting to page 1 would imply it searches the collection.
+
+    // Debounced, not immediate: this now reaches the server (see `resource`
+    // above), and firing a request per keystroke would queue up nine
+    // requests for "iris" only to throw eight of them away. Resetting to
+    // page 1 belongs in the same callback as committing the search term -
+    // if it fired on every keystroke instead, a filter typed while on page 4
+    // would flash back to page 1 before the user finished typing.
+    clearTimeout(this.authorFilterTimer);
+    this.authorFilterTimer = setTimeout(() => {
+      this.committedAuthorFilter.set(value);
+      this.page.set(MIN_PAGE);
+    }, AUTHOR_FILTER_DEBOUNCE_MS);
   }
 
   setSize(value: string | number): void {
@@ -196,7 +245,10 @@ export class QuotesStore {
   }
 
   clearFilter(): void {
+    clearTimeout(this.authorFilterTimer);
     this.authorFilter.set('');
+    this.committedAuthorFilter.set('');
+    this.page.set(MIN_PAGE);
   }
 
   firstPage(): void {
@@ -265,7 +317,18 @@ export class QuotesStore {
         next.delete(id);
         return next;
       });
-      this._deleteError.set('Could not delete that quote. It has been put back.');
+
+      // 403 gets its own message rather than falling into the generic one
+      // below. The template already hides the delete affordance on rows the
+      // signed-in user does not own, so this only fires against a stale
+      // screen (the row's ownership changed, or it loaded before sign-in) —
+      // rare, but "you can only delete your own quotes" tells the user what
+      // actually happened instead of implying a transient server hiccup.
+      this._deleteError.set(
+        appError.kind === 'forbidden'
+          ? 'You can only delete your own quotes. It has been put back.'
+          : 'Could not delete that quote. It has been put back.',
+      );
     }
   }
 

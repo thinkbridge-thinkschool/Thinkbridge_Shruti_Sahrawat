@@ -29,13 +29,29 @@ import { QuotesStore } from './quotes-store';
       <div class="account">
         @if (auth.user(); as user) {
           <span class="who">
+            <svg class="icon" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+              <circle cx="12" cy="8" r="4"></circle>
+              <path d="M4 21c0-4 4-6 8-6s8 2 8 6"></path>
+            </svg>
             Signed in as <strong>{{ user.email }}</strong>
             @if (auth.isAdmin()) {
-              <span class="role-badge">admin</span>
+              <span class="role-badge">
+                <svg class="icon" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                  <path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-4z"></path>
+                </svg>
+                admin
+              </span>
             }
           </span>
         }
-        <button type="button" class="sign-out" (click)="signOut()">Sign out</button>
+        <button type="button" class="sign-out" (click)="signOut()">
+          <svg class="icon" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+            <polyline points="16 17 21 12 16 7"></polyline>
+            <line x1="21" y1="12" x2="9" y2="12"></line>
+          </svg>
+          Sign out
+        </button>
       </div>
 
       <h1>Quotes</h1>
@@ -44,7 +60,7 @@ import { QuotesStore } from './quotes-store';
           Every quote in the database, including ones created before accounts
           existed. You can delete any of them.
         } @else {
-          The quotes you have added. Nobody else can see or delete them.
+          Every quote in the database. You can delete only the ones you added.
         }
       </p>
     </header>
@@ -52,13 +68,19 @@ import { QuotesStore } from './quotes-store';
     <form class="controls" (submit)="$event.preventDefault()">
       <label>
         Filter by author
-        <input
-          type="search"
-          name="author"
-          placeholder="e.g. Ada"
-          [value]="store.authorFilter()"
-          (input)="store.setAuthorFilter($any($event.target).value)"
-        />
+        <span class="input-icon">
+          <svg class="icon" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <circle cx="11" cy="11" r="7"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input
+            type="search"
+            name="author"
+            placeholder="e.g. Ada"
+            [value]="store.authorFilter()"
+            (input)="store.setAuthorFilter($any($event.target).value)"
+          />
+        </span>
       </label>
 
       <label>
@@ -73,7 +95,13 @@ import { QuotesStore } from './quotes-store';
         />
       </label>
 
-      <a class="add-link" routerLink="/quotes/new">Add a quote</a>
+      <a class="add-link" routerLink="/quotes/new">
+        <svg class="icon" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+        Add a quote
+      </a>
     </form>
 
     <!-- Present unconditionally with only its content toggling: a live
@@ -136,7 +164,7 @@ import { QuotesStore } from './quotes-store';
 
       @case ('no-matches') {
         <p class="state">
-          No quotes on this page by an author matching “{{ store.authorFilter() }}”.
+          No quotes found by an author matching “{{ store.authorFilter() }}”.
           <button type="button" (click)="store.clearFilter()">Clear filter</button>
         </p>
       }
@@ -158,28 +186,44 @@ import { QuotesStore } from './quotes-store';
                 <blockquote>{{ q.text }}</blockquote>
                 <footer>
                   <cite>{{ q.author }}</cite>
-                  <!-- Only an admin sees rows they do not own, so only an
-                       admin needs to be told whose a row is. Showing "yours"
-                       on every row of an ordinary user's own list would be
-                       noise on every line. -->
-                  @if (auth.isAdmin()) {
-                    <span class="owner">{{ ownerLabel(q.ownerId) }}</span>
-                  }
+                  <!-- Shown to everyone now, not just an admin: since every
+                       user sees every quote (only deleting is restricted),
+                       this is what tells an ordinary user why some rows have
+                       a delete button and others don't. -->
+                  <span
+                    class="owner"
+                    [attr.title]="q.ownerId === null ? 'Created before login accounts existed' : null"
+                    >{{ ownerLabel(q.ownerId) }}</span
+                  >
                   <time [attr.datetime]="q.createdAt">
                     {{ q.createdAt | date: 'mediumDate' }}
                   </time>
                 </footer>
               </a>
               <!-- Outside the <a>, not inside it: a button nested in a link
-                   is invalid HTML and its click would race the navigation. -->
-              <button
-                type="button"
-                class="delete"
-                [attr.aria-label]="'Delete quote by ' + q.author"
-                (click)="store.deleteQuote(q.id)"
-              >
-                Delete
-              </button>
+                   is invalid HTML and its click would race the navigation.
+                   Only rendered for a row this signed-in user is actually
+                   allowed to delete - their own, or any row at all for an
+                   admin - now that the list shows everyone's quotes to
+                   everyone. The server still refuses the request either way
+                   (403, see quotes-store.ts), but there is no reason to show
+                   an affordance that only leads to a rejection. -->
+              @if (auth.isAdmin() || q.ownerId === auth.user()?.id) {
+                <button
+                  type="button"
+                  class="delete"
+                  [attr.aria-label]="'Delete quote by ' + q.author"
+                  (click)="store.deleteQuote(q.id)"
+                >
+                  <svg class="icon" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+                    <path d="M10 11v6"></path>
+                    <path d="M14 11v6"></path>
+                    <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>
+                  </svg>
+                </button>
+              }
             </li>
           } @empty {
             <!-- Unreachable: 'ready' is only reached when visibleQuotes() is
@@ -254,14 +298,20 @@ export class QuotesList {
    * does not simply forward to the store.
    */
   /**
-   * Whose quote this is, in words, for the admin view.
+   * Whose quote this is, in words. Shown on every row to every signed-in
+   * user now that everyone sees everyone's quotes — it is what explains why
+   * some rows carry a delete button and others don't.
    *
-   * "Unowned" is a real category, not a missing value: those rows were created
-   * before the API had accounts. They are shown to admins and to nobody else,
-   * rather than being backfilled to whoever registered first.
+   * "No owner" is a real category, not a missing value: those rows were
+   * created before the API had accounts, and nobody is allowed to delete
+   * them except an admin — backfilling an owner to whoever looked first
+   * would invent history the data never had. Named "no owner" rather than
+   * the earlier "unowned" because that word alone read, to at least one
+   * user, as if something had gone wrong with the quote — the title
+   * attribute above spells out why a row can be in this state at all.
    */
   ownerLabel(ownerId: number | null): string {
-    if (ownerId === null) return 'unowned';
+    if (ownerId === null) return 'no owner';
     return ownerId === this.auth.user()?.id ? 'yours' : `user #${ownerId}`;
   }
 

@@ -57,6 +57,22 @@ describe('errorMappingInterceptor', () => {
     expect(error.message).toBe('Please fix the highlighted fields and try again.');
   });
 
+  it('maps a 403 plain ProblemDetails to a forbidden AppError using its detail', async () => {
+    const pending = firstValueFrom(http.delete<never>('/api/quotes/1', { context: mapped() })).catch(
+      (e: AppError) => e,
+    );
+
+    httpMock.expectOne('/api/quotes/1').flush(
+      { type: 'about:blank', title: 'Not your quote', status: 403, detail: 'You can only delete quotes you added yourself.' },
+      { status: 403, statusText: 'Forbidden' },
+    );
+
+    const error = await pending;
+    expect(error.kind).toBe('forbidden');
+    if (error.kind !== 'forbidden') throw new Error('expected a forbidden error');
+    expect(error.message).toBe('You can only delete quotes you added yourself.');
+  });
+
   it('maps a 404 plain ProblemDetails to a notFound AppError using its detail, not a field-errors dictionary that was never there', async () => {
     const pending = firstValueFrom(http.get<never>('/api/quotes/999999', { context: mapped() })).catch(
       (e: AppError) => e,

@@ -5,8 +5,9 @@ import {
   TestRequest,
   provideHttpClientTesting,
 } from '@angular/common/http/testing';
+import { vi } from 'vitest';
 import { errorMappingInterceptor } from './error-mapping';
-import { QuotesStore } from './quotes-store';
+import { AUTHOR_FILTER_DEBOUNCE_MS, QuotesStore } from './quotes-store';
 import type { Quote } from './quotes';
 
 /**
@@ -33,6 +34,12 @@ describe('QuotesStore', () => {
     await Promise.resolve();
     await Promise.resolve();
     TestBed.tick();
+  }
+
+  /** Lets a debounced author-filter commit land, then settles the fetch it triggers. */
+  async function settleFilter(): Promise<void> {
+    await vi.advanceTimersByTimeAsync(AUTHOR_FILTER_DEBOUNCE_MS);
+    await settle();
   }
 
   const quote = (id: number, author = `Author ${id}`): Quote => ({
@@ -65,6 +72,7 @@ describe('QuotesStore', () => {
   }
 
   beforeEach(async () => {
+    vi.useFakeTimers();
     TestBed.configureTestingModule({
       providers: [
         // errorMappingInterceptor is wired in deliberately, not left to its
@@ -86,7 +94,10 @@ describe('QuotesStore', () => {
     await settle();
   });
 
-  afterEach(() => httpMock.verify({ ignoreCancelled: true }));
+  afterEach(() => {
+    httpMock.verify({ ignoreCancelled: true });
+    vi.useRealTimers();
+  });
 
   // ---- the read path: the four states the list can be in ----------------
 
@@ -121,6 +132,9 @@ describe('QuotesStore', () => {
       await loadInitial([quote(1, 'Ada Lovelace'), quote(2, 'Alan Turing')]);
 
       store.setAuthorFilter('Grace');
+      await settleFilter();
+
+      httpMock.expectOne((r) => r.url.includes('author=Grace')).flush(page([], 0));
       await settle();
 
       // Different state, different words on screen, different recovery
@@ -130,16 +144,36 @@ describe('QuotesStore', () => {
       expect(store.visibleQuotes()).toEqual([]);
     });
 
-    it('filters client-side over the current page and issues no request', async () => {
+    it('searches the author across the whole collection, not just the current page', async () => {
+      // A page of two rows that do not match "grace" at all - the point is
+      // that the match still has to be found, because it is the server, not
+      // this page in hand, that is being searched.
       await loadInitial([quote(1, 'Ada Lovelace'), quote(2, 'Alan Turing')]);
 
-      store.setAuthorFilter('ada');
+      store.setAuthorFilter('grace');
+      await settleFilter();
+
+      const req = httpMock.expectOne((r) => r.url.includes('author=grace'));
+      // Filter changes also jump back to page 1 - a search result found on
+      // whatever page happened to be showing would be a confusing place to
+      // land it.
+      expect(req.request.url).toContain('page=1');
+      req.flush(page([quote(3, 'Grace Hopper')], 1));
       await settle();
 
-      expect(store.visibleQuotes().map((q) => q.id)).toEqual([1]);
-      // afterEach's httpMock.verify() is the assertion that matters here:
-      // a keystroke that reached the server would leave an unflushed
-      // request behind. The filter narrows rows already in hand.
+      expect(store.visibleQuotes().map((q) => q.id)).toEqual([3]);
+    });
+
+    it('debounces keystrokes rather than issuing a request per character', async () => {
+      await loadInitial([quote(1)]);
+
+      store.setAuthorFilter('g');
+      store.setAuthorFilter('gr');
+      store.setAuthorFilter('gra');
+      await settleFilter();
+
+      // Exactly one request, for the final value - not one per keystroke.
+      httpMock.expectOne((r) => r.url.includes('author=gra'));
     });
   });
 
@@ -245,6 +279,30 @@ describe('QuotesStore', () => {
 
       listRequest().flush(page([quote(2)], 1));
       await settle();
+    });
+
+    it('rolls back and reports a clear message on a 403 — someone else\'s quote', async () => {
+      // The template hides the delete button for a row this user does not
+      // own, but the store still has to handle a 403 correctly on its own:
+      // a stale screen, or a request made outside the UI, can still reach
+      // the server after ownership stopped matching what's on screen.
+      await loadInitial([quote(1)], 1);
+
+      store.deleteQuote(1);
+      await settle();
+
+      httpMock
+        .expectOne({ method: 'DELETE', url: '/api/quotes/1' })
+        .flush(
+          { title: 'Not your quote', status: 403, detail: 'You can only delete quotes you added yourself.' },
+          { status: 403, statusText: 'Forbidden' },
+        );
+      await settle();
+
+      // Unlike the 404 case above, a 403 means the quote is still there —
+      // the row comes back rather than staying masked.
+      expect(store.visibleQuotes().map((q) => q.id)).toEqual([1]);
+      expect(store.deleteError()).toContain('your own quotes');
     });
 
     // ---- the case the draft got wrong ----------------------------------
