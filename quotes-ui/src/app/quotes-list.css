@@ -68,7 +68,7 @@ code {
   left: 0.7rem;
   top: 50%;
   transform: translateY(-50%);
-  color: var(--muted);
+  color: var(--icon-cyan);
   pointer-events: none;
 }
 
@@ -437,7 +437,7 @@ button:focus-visible {
 }
 
 .account .who > .icon {
-  color: var(--accent);
+  color: var(--icon-blue);
 }
 
 .account .who strong {
@@ -455,8 +455,8 @@ button:focus-visible {
   margin-left: 0.4rem;
   padding: 0.05rem 0.45rem;
   border-radius: 999px;
-  background: var(--accent);
-  color: var(--on-accent, white);
+  background: var(--icon-amber);
+  color: var(--ink-on-amber);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -485,7 +485,7 @@ button:focus-visible {
 
 .sign-out:hover {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--icon-blue);
 }
 
 .sign-out:focus-visible {

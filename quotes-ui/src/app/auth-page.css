@@ -139,6 +139,6 @@ button[type='submit']:focus-visible {
 }
 
 .alt a {
-  color: var(--accent);
+  color: var(--icon-blue);
   font-weight: 600;
 }

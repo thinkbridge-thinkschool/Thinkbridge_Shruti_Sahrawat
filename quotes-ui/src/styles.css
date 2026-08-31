@@ -1,41 +1,74 @@
 /*
  * Design tokens, shared by every component via `var(--…)`.
  *
- * Single light theme, applied unconditionally rather than driven by
+ * Single dark theme, applied unconditionally rather than driven by
  * `prefers-color-scheme` — every component already reads exclusively through
  * these tokens (nothing in the app hardcodes a color), so retheming here is
  * enough to reskin the whole app with zero per-component changes. That is
- * the property this file relies on: it was originally written for a dark
- * palette, and switching to this white-and-green one only ever touched this
- * one file.
- * `color-scheme: light` is also what tells the browser's own UI (scrollbars,
- * form controls) to render light. `--bg` gets an explicit value and is set
+ * the property this file relies on: it has already been swapped once before
+ * (dark purple → white/green) and now again (white/green → black/blue) with
+ * only this one file touched each time.
+ *
+ * `color-scheme: dark` is also what tells the browser's own UI (scrollbars,
+ * form controls) to render dark. `--bg` gets an explicit value and is set
  * on <body> below — a page with no background color set is transparent,
  * which is how a mismatched color-scheme goes unreadable: the browser
  * chrome paints one way, the page assumes another, and nothing composited.
+ *
+ * Two blue tokens, not one, and that split is deliberate:
+ *   --accent       is the *filled-button* blue — dark/saturated enough that
+ *                   white text (--on-accent) sitting on top of it still
+ *                   clears WCAG AA (~4.6:1). This is the token every
+ *                   existing filled control (Add a quote, Sign in, Create
+ *                   account, submit buttons) already uses as its
+ *                   background, plus every focus ring and hover border.
+ *   --icon-blue     is a brighter sky-blue, used only where an icon or a
+ *                   link sits directly on the black page background with no
+ *                   fill behind it (the "signed in as" icon, the sign-out
+ *                   hover state, the "Create one" / "Sign in" links). A
+ *                   color dark enough for white-on-top text reads as dim
+ *                   and low-contrast on pure black; a color bright enough to
+ *                   pop on black is too light for white text on top of it.
+ *                   Two tokens is cheaper than one token doing both jobs
+ *                   badly.
+ * The remaining icon-* tokens are pure decoration: they give the small
+ * inline SVGs scattered through the app (search, admin badge, success
+ * check, the quote-mark flourish) some variety on top of the blue chrome,
+ * without turning them into a second set of "this is clickable" signals —
+ * none of them are used for anything interactive.
  */
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
 
-  --bg: #ffffff;
-  --surface: #f2faf3;
-  --surface-sunken: #e6f4e8;
-  --ink: #16261b;
-  --ink-soft: #3f5346;
-  --muted: #6d8074;
-  --rule: #d7ead9;
-  --rule-strong: #a9cdae;
-  --accent: #3f9142;
-  --accent-soft: rgba(63, 145, 66, 0.12);
-  --accent-strong: #2c6e30;
-  --bad: #c0362c;
-  --bad-soft: rgba(192, 54, 44, 0.09);
+  --bg: #0a0c12;
+  --surface: #12151f;
+  --surface-sunken: #1a2030;
+  --ink: #eef1f7;
+  --ink-soft: #c7cede;
+  --muted: #8a93ac;
+  --rule: #232838;
+  --rule-strong: #37405a;
 
-  /* A lighter, yellower green than --accent, used sparingly — the
-     quote-mark glyph, nothing interactive — so it reads as a design
-     flourish rather than competing with --accent for "this is clickable". */
-  --highlight: #9ccc65;
+  --accent: #2f6fed;
+  --accent-soft: rgba(47, 111, 237, 0.18);
+  --accent-strong: #1e40af;
+
+  --bad: #ff6b6b;
+  --bad-soft: rgba(255, 107, 107, 0.14);
+  --good-soft: rgba(52, 211, 153, 0.14);
+
+  /* A light violet, used sparingly — the quote-mark glyph, nothing
+     interactive — so it reads as a design flourish rather than competing
+     with --accent for "this is clickable". */
+  --highlight: #b794f6;
+
+  /* Icon-only accent colors — never a background behind body text, never a
+     focus ring, never a border. Just color on a handful of small SVGs. */
+  --icon-blue: #6cb2ff;
+  --icon-cyan: #22d3ee;
+  --icon-amber: #fbbf24;
+  --icon-green: #34d399;
 
   --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-quote: 'Source Serif 4', Georgia, 'Times New Roman', serif;
@@ -46,13 +79,16 @@
   --radius-lg: 14px;
 
   --on-accent: #ffffff;
+  /* Dark ink for text/icons sitting on the amber admin badge — white on
+     amber fails contrast the way white on the bright icon blues would. */
+  --ink-on-amber: #241a00;
 
-  /* Shadows read as almost nothing on a white page unless they are this
-     soft: depth comes from a low-opacity, green-tinted shadow rather than
-     the harsher black drop-shadow a dark theme can get away with, so a
-     card lifts off the page without looking like it is sitting in fog. */
-  --shadow-sm: 0 1px 2px rgba(22, 38, 27, 0.08), 0 0 0 1px rgba(22, 38, 27, 0.04);
-  --shadow-md: 0 16px 32px rgba(22, 38, 27, 0.12), 0 0 0 1px rgba(63, 145, 66, 0.10);
+  /* On a black page, depth comes from a genuine dark drop-shadow (which a
+     light theme can't use — it just reads as a grey smudge) plus a faint
+     blue rim-light at 1px, so a lifted card gets a subtle glow instead of
+     vanishing into the background it's supposed to be sitting above. */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --shadow-md: 0 20px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(47, 111, 237, 0.16);
   --shadow-focus-accent: 0 0 0 4px var(--accent-soft);
 }
 
@@ -61,7 +97,7 @@
 }
 
 html {
-  color-scheme: light;
+  color-scheme: dark;
 }
 
 body {
