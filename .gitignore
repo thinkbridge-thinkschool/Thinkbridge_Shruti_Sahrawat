@@ -41,3 +41,17 @@ order-tests.txt
 # Entra app-registration request bodies
 scope.json
 preauth.json
+
+# Azure operational scratch files - these are `az containerapp show` dumps and a
+# one-off data-load script. fix-config.yaml carries a live JWT signing key and
+# load-data.sql carries a password hash; neither belongs in git history.
+fix-config.yaml
+updated-containerapp.yaml
+revert-containerapp.yaml
+load-data.sql
+
+# Service Bus emulator local env (generated, holds a throwaway container password)
+servicebus-emulator/.env
+
+# FUSE bridge artifacts
+.fuse_hidden*

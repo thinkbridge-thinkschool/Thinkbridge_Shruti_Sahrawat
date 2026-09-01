@@ -251,7 +251,24 @@ app.UseAuthorization();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<QuotesDbContext>();
-    db.Database.Migrate();
+
+    // SQL Server in production has no migrations of its own shipped in this
+    // project - the SQL-Server-native migration set proven by
+    // Quotes.Tests.Integration lives in that test assembly, which is not part
+    // of the deployed image. EnsureCreated() builds the schema directly from
+    // the current model instead, which sidesteps needing that assembly here
+    // at the cost of not tracking migration history for this provider - a
+    // fair trade for a database this API is not yet evolving incrementally
+    // in production. SQLite (everywhere so far) keeps using Migrate(),
+    // unchanged.
+    if (db.Database.IsSqlServer())
+    {
+        db.Database.EnsureCreated();
+    }
+    else
+    {
+        db.Database.Migrate();
+    }
 }
 
 app.MapHealthChecks("/health");

@@ -14,6 +14,8 @@ resources:
         port: 8080
         env:
             - name: ConnectionStrings__Default
-              value: Data Source=/tmp/quotes.db
+              value: Server=tcp:sql-quotes2-qvdk5l.database.windows.net,1433;Database=quotesdb;Authentication=Active Directory Managed Identity;User Id=b5e81529-a6b9-4a13-ba5a-ce729ef9a3a3;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;
+            - name: Database__Provider
+              value: SqlServer
             - name: ASPNETCORE_ENVIRONMENT
               value: Production

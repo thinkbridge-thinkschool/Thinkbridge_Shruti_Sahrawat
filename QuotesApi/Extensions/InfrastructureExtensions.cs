@@ -14,9 +14,26 @@ public static class InfrastructureExtensions
     {
         var connectionString = configuration.GetConnectionString("Default") ?? "Data Source=quotes.db";
 
+        // Chosen explicitly via config rather than sniffed from the connection
+        // string's shape - a "Server=..." substring is not a reliable enough
+        // signal, and an explicit setting fails loudly (wrong provider, not a
+        // silently wrong one) if it is ever missing where it matters.
+        // Unset (local dev, and every environment before this one) keeps the
+        // original SQLite behaviour - existing migrations, existing tests,
+        // untouched.
+        var provider = configuration["Database:Provider"] ?? "Sqlite";
+        var useSqlServer = string.Equals(provider, "SqlServer", StringComparison.OrdinalIgnoreCase);
+
         services.AddDbContext<QuotesDbContext>(options =>
         {
-            options.UseSqlite(connectionString);
+            if (useSqlServer)
+            {
+                options.UseSqlServer(connectionString);
+            }
+            else
+            {
+                options.UseSqlite(connectionString);
+            }
 
             if (isDevelopment)
             {
