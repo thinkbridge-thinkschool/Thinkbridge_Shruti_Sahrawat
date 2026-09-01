@@ -22,6 +22,7 @@ Quick navigation into each day's brief, code, and evidence. The full narrative (
 | 17 | Deploy to Azure Static Web Apps | [`Days/day-17/`](day-17/README.md) |
 | 18 | Background jobs | [`Days/day-18/`](day-18/README.md) |
 | 19 | Service Bus topics + DLQ | [`Days/day-19/`](day-19/README.md) |
+| 20 | The outbox pattern | [`Days/day-20/`](day-20/README.md) |
 
 Day 6 was a holiday — no exercise that day.
 

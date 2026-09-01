@@ -2,6 +2,7 @@
   <Project Path="OrderRefactor.Tests/OrderRefactor.Tests.csproj" />
   <Project Path="OrderRefactor/OrderRefactor.csproj" />
   <Project Path="Quotes.Messaging/Quotes.Messaging.csproj" />
+  <Project Path="Quotes.Outbox/Quotes.Outbox.csproj" />
   <Project Path="Quotes.Tests.Integration/Quotes.Tests.Integration.csproj" />
   <Project Path="Quotes.Tests.Unit/Quotes.Tests.Unit.csproj" />
   <Project Path="Quotes.Worker/Quotes.Worker.csproj" />

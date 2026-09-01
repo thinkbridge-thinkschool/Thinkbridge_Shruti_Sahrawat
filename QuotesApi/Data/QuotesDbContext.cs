@@ -16,6 +16,9 @@ public class QuotesDbContext : DbContext
     // Accounts. See Models/User.cs.
     public DbSet<User> Users => Set<User>();
 
+    // The outbox. See Models/OutboxMessage.cs for why it exists.
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // Your existing Quote configuration
@@ -37,6 +40,31 @@ public class QuotesDbContext : DbContext
             // asked to make yet - there is no delete-account endpoint. Leaving
             // it as a plain indexed column keeps that choice open instead of
             // baking one in through a constraint nobody chose deliberately.
+        });
+
+        modelBuilder.Entity<OutboxMessage>(entity =>
+        {
+            entity.HasKey(o => o.Id);
+            entity.Property(o => o.MessageId).IsRequired().HasMaxLength(200);
+            entity.Property(o => o.EventType).IsRequired().HasMaxLength(64);
+            entity.Property(o => o.Payload).IsRequired();
+            entity.Property(o => o.OccurredAt).IsRequired();
+
+            // Unique, not just indexed. This is what makes QuoteRepository's
+            // atomicity argument checkable rather than assumed: a duplicate
+            // MessageId can only arrive here if the same event tried to write
+            // an outbox row twice, and the constraint - not application code -
+            // is what refuses the second one and rolls back whatever
+            // transaction it was part of.
+            entity.HasIndex(o => o.MessageId).IsUnique();
+
+            // Every relay poll is "WHERE SentAt IS NULL", so the column that
+            // decides which rows even get scanned is the one that needs the
+            // index. A filtered index (WHERE SentAt IS NULL) would be tighter
+            // at production scale, but SQLite and SQL Server spell that
+            // differently and this app runs on both - a plain index on the
+            // column is the one definition that is correct on either.
+            entity.HasIndex(o => o.SentAt);
         });
 
         modelBuilder.Entity<User>(entity =>

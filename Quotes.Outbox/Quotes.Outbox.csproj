@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UserSecretsId>7b6c1e2a-4f0e-4a3b-9c7e-2d5f6a1b8c9d</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Publisher, contracts and the deterministic message id only - the same
+         reasons Quotes.Worker takes this reference. This project does not
+         reference QuotesApi: it never needs QuotesApi's whole model (Users,
+         Collections, auth), only the one table an outbox relay is allowed to
+         know about. See OutboxDbContext. -->
+    <ProjectReference Include="..\Quotes.Messaging\Quotes.Messaging.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

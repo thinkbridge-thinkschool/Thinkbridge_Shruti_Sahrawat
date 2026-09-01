@@ -1,6 +1,9 @@
 using Microsoft.EntityFrameworkCore;
+using Quotes.Messaging.Contracts;
+using Quotes.Messaging.Publishing;
 using QuotesApi.Data;
 using QuotesApi.Models;
+using QuotesApi.Services;
 
 namespace QuotesApi.Repositories;
 
@@ -8,11 +11,13 @@ public class QuoteRepository : IQuoteRepository
 {
     private readonly QuotesDbContext _context;
     private readonly ILogger<QuoteRepository> _logger;
+    private readonly IClock _clock;
 
-    public QuoteRepository(QuotesDbContext context, ILogger<QuoteRepository> logger)
+    public QuoteRepository(QuotesDbContext context, ILogger<QuoteRepository> logger, IClock clock)
     {
         _context = context;
         _logger = logger;
+        _clock = clock;
     }
 
     public async Task<(IReadOnlyList<Quote> Items, int TotalCount)> GetPagedAsync(int page, int size, int? ownerId, string? authorFilter, CancellationToken ct)
@@ -59,10 +64,44 @@ public class QuoteRepository : IQuoteRepository
         return await _context.Quotes.FindAsync(new object[] { id }, ct);
     }
 
+    /// <remarks>
+    /// This is the write side of Day 20's outbox: the insert and the outbox
+    /// row that announces it happen in one database transaction, so a crash
+    /// between them cannot leave a quote nobody will ever hear about.
+    ///
+    /// It is deliberately <em>two</em> SaveChanges calls, not one, wrapped in
+    /// an explicit transaction rather than relying on a single SaveChanges to
+    /// be "the" transaction the way QuoteEventDispatcher's ledger write does.
+    /// The outbox payload needs <c>quote.Id</c> - both in the JSON body and in
+    /// the deterministic message id - and that value does not exist until the
+    /// insert has actually run against the database; SQLite and SQL Server
+    /// both assign it on execution, not when the entity is staged. Committing
+    /// only once both writes have succeeded is what makes the two atomic here,
+    /// not the number of round trips: if the second SaveChanges throws for any
+    /// reason, the transaction is disposed without a commit and the first
+    /// insert rolls back with it, so the quote never exists without the
+    /// outbox row that is supposed to announce it. See
+    /// AddAsync_WhenTheOutboxInsertFails_RollsBackTheQuoteToo for the test
+    /// that forces exactly this and checks the quote table from a separate,
+    /// untainted connection afterwards.
+    /// </remarks>
     public async Task<Quote> AddAsync(Quote quote, CancellationToken ct)
     {
+        await using var transaction = await _context.Database.BeginTransactionAsync(ct);
+
         _context.Quotes.Add(quote);
         await _context.SaveChangesAsync(ct);
+
+        var occurredAt = new DateTimeOffset(quote.CreatedAt, TimeSpan.Zero);
+        var payload = new QuoteCreated(quote.Id, quote.Author, quote.Text, occurredAt);
+        var messageId = QuoteEventIds.For(QuoteEventTypes.QuoteCreated, quote.Id, occurredAt);
+
+        _context.OutboxMessages.Add(
+            OutboxMessage.For(payload, QuoteEventTypes.QuoteCreated, messageId, occurredAt));
+        await _context.SaveChangesAsync(ct);
+
+        await transaction.CommitAsync(ct);
+
         _logger.LogInformation("Created quote {Id}", quote.Id);
         return quote;
     }
@@ -73,6 +112,17 @@ public class QuoteRepository : IQuoteRepository
         if (quote is null) return false;
 
         _context.Quotes.Remove(quote);
+
+        // No chicken-and-egg here the way AddAsync has one: id already exists,
+        // so the outbox row can be built and staged before SaveChanges runs at
+        // all, and one call - one transaction - covers both writes.
+        var occurredAt = _clock.UtcNow;
+        var payload = new QuoteDeleted(id, occurredAt);
+        var messageId = QuoteEventIds.For(QuoteEventTypes.QuoteDeleted, id, occurredAt);
+
+        _context.OutboxMessages.Add(
+            OutboxMessage.For(payload, QuoteEventTypes.QuoteDeleted, messageId, occurredAt));
+
         await _context.SaveChangesAsync(ct);
         _logger.LogInformation("Deleted quote {Id}", id);
         return true;

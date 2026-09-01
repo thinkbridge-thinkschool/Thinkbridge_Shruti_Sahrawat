@@ -34,4 +34,16 @@
     <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Day 20: shared only for the outbox's event contracts (QuoteCreated,
+         QuoteDeleted, QuoteEventTypes, QuoteEventIds) - the same types Day 19's
+         publisher and consumers already use, so the message id this API stages
+         is byte-for-byte the id the relay (Quotes.Outbox) will actually publish
+         with. No IQuoteEventPublisher is registered here and no ServiceBusClient
+         is constructed in this host - Day 19's reasoning for keeping the API
+         free of a live Service Bus dependency still holds; this reference pulls
+         in a package, not a running connection. -->
+    <ProjectReference Include="..\Quotes.Messaging\Quotes.Messaging.csproj" />
+  </ItemGroup>
+
 </Project>
