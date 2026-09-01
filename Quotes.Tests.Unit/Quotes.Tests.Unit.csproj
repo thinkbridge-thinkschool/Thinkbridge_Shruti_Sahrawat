@@ -34,6 +34,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\OrderRefactor\OrderRefactor.csproj" />
+    <ProjectReference Include="..\Quotes.Messaging\Quotes.Messaging.csproj" />
     <ProjectReference Include="..\QuotesApi\QuotesApi.csproj" />
   </ItemGroup>
 

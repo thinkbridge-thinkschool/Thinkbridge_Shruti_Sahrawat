@@ -1,0 +1,86 @@
+Day 19 - Azure Service Bus topics + DLQ
+Captured 2026-09-01 13:08:12 +05:30
+Target: Azure Service Bus Standard namespace sb-quotes2-qvdk5l.servicebus.windows.net, DefaultAzureCredential (no key)
+Topic: quote-events   Subscriptions: search-indexer (SQL filter), audit-log (catch-all)
+MaxDeliveryCount: 3   Worker instances: worker-1, worker-2
+
+==============================================================================
+SEARCH INDEX PROJECTION  (6 rows)
+==============================================================================
+   101  Ada Lovelace          That brain of mine is something more than...
+   102  Grace Hopper          The most damaging phrase is: we have alwa...
+   103  Alan Turing           Those who can imagine anything, can creat...
+   104  Barbara Liskov        There is a huge difference between a prog...
+   105  Edsger Dijkstra       Simplicity is prerequisite for reliability.
+   106  Margaret Hamilton     There was no choice but to be pioneers.
+
+==============================================================================
+AUDIT LOG  (9 rows)
+==============================================================================
+    1  QuoteCreated   quoteId=102   at 07:37:16
+    2  QuoteCreated   quoteId=104   at 07:37:16
+    3  QuoteCreated   quoteId=101   at 07:37:16
+    4  QuoteCreated   quoteId=103   at 07:37:16
+    5  QuoteCreated   quoteId=105   at 07:37:17
+    6  QuoteCreated   quoteId=106   at 07:37:17
+    7  QuoteDeleted   quoteId=103   at 07:37:17
+    8  QuoteCreated   quoteId=-1    at 07:37:17
+    9  QuoteCreated   quoteId=999   at 07:37:17
+
+==============================================================================
+IDEMPOTENCY LEDGER  (15 rows)
+==============================================================================
+
+  audit-log  (9 messages processed exactly once)
+    QuoteCreated--1-20260901T090500000Z             by worker-1
+    QuoteCreated-101-20260901T090141000Z            by worker-1
+    QuoteCreated-102-20260901T090142000Z            by worker-2
+    QuoteCreated-103-20260901T090143000Z            by worker-1
+    QuoteCreated-104-20260901T090144000Z            by worker-2
+    QuoteCreated-105-20260901T090145000Z            by worker-2
+    QuoteCreated-106-20260901T090146000Z            by worker-2
+    QuoteCreated-999-20260901T090640000Z            by worker-1
+    QuoteDeleted-103-20260901T090320000Z            by worker-2
+    -> split across instances: worker-1=4, worker-2=5
+
+  search-indexer  (6 messages processed exactly once)
+    QuoteCreated-101-20260901T090141000Z            by worker-1
+    QuoteCreated-102-20260901T090142000Z            by worker-2
+    QuoteCreated-103-20260901T090143000Z            by worker-1
+    QuoteCreated-104-20260901T090144000Z            by worker-2
+    QuoteCreated-105-20260901T090145000Z            by worker-2
+    QuoteCreated-106-20260901T090146000Z            by worker-2
+    -> split across instances: worker-1=2, worker-2=4
+
+
+==============================================================================
+IDEMPOTENCY: REDELIVERIES REJECTED (from the worker consoles)
+==============================================================================
+  [worker-2] Duplicate ignored: audit-log had already processed messageId=QuoteCreated-101-20260901T090141000Z (deliveryCount=1)
+  [worker-2] Duplicate ignored: search-indexer had already processed messageId=QuoteCreated-101-20260901T090141000Z (deliveryCount=1)
+
+==============================================================================
+DEAD-LETTER QUEUE: quote-events/Subscriptions/search-indexer
+==============================================================================
+
+  MessageId                 : QuoteCreated--1-20260901T090500000Z
+  DeadLetterReason          : InvalidQuoteId
+  DeadLetterErrorDescription: QuoteId was -1; must be positive.
+  DeliveryCount             : 0
+  EnqueuedTime              : 2026-09-01 07:37:16Z
+  Body                      : {"quoteId":-1,"author":"Nobody","text":"This payload can never be indexed.","occurredAt":"2026-09-01...
+
+  MessageId                 : QuoteCreated-999-20260901T090640000Z
+  DeadLetterReason          : MaxDeliveryCountExceeded
+  DeadLetterErrorDescription: Message could not be consumed after 3 delivery attempts.
+  DeliveryCount             : 3
+  EnqueuedTime              : 2026-09-01 07:37:16Z
+  Body                      : {"quoteId":999,"author":"ALWAYS-FAILS","text":"Retried, then dead-lettered.","occurredAt":"2026-09-0...
+
+  2 message(s) dead-lettered on search-indexer.
+
+==============================================================================
+DEAD-LETTER QUEUE: quote-events/Subscriptions/audit-log
+==============================================================================
+  (empty)
+

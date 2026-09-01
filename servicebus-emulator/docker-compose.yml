@@ -1,0 +1,49 @@
+# Azure Service Bus emulator, per Microsoft's installer topology:
+# the emulator container itself plus a SQL Server it uses as its state store.
+#
+# The emulator is deliberately the *only* way this repo gets a topic. Service
+# Bus topics do not exist below the Standard tier - Basic supports queues only -
+# so "publish to a topic" is a paid namespace in real Azure. The emulator gives
+# the same AMQP surface, including subscriptions, filters and dead-letter
+# queues, for nothing.
+name: quotes-servicebus
+
+services:
+  emulator:
+    container_name: quotes-sb-emulator
+    image: mcr.microsoft.com/azure-messaging/servicebus-emulator:latest
+    pull_policy: missing
+    volumes:
+      # Source name is ours; the target path is fixed by the emulator image.
+      - "./config.json:/ServiceBus_Emulator/ConfigFiles/Config.json:ro"
+    ports:
+      - "5672:5672"   # AMQP - what Azure.Messaging.ServiceBus connects to
+      - "5300:5300"   # management operations
+    environment:
+      SQL_SERVER: sqlserver
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD}"
+      ACCEPT_EULA: "Y"
+      # The emulator boots faster than SQL Server does. depends_on only waits
+      # for the container to *start*, not for SQL to accept connections, so the
+      # emulator needs its own retry window on top.
+      SQL_WAIT_INTERVAL: "20"
+    depends_on:
+      - sqlserver
+    networks:
+      sb-emulator:
+        aliases:
+          - "sb-emulator"
+
+  sqlserver:
+    container_name: quotes-sb-sqlserver
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD}"
+    networks:
+      sb-emulator:
+        aliases:
+          - "sqlserver"
+
+networks:
+  sb-emulator:

@@ -53,3 +53,17 @@ public sealed class OrderTestClock : OrderRefactor.Services.IClock
         return this;
     }
 }
+
+/// <summary>
+/// A frozen <see cref="TimeProvider"/>, for the messaging code.
+/// </summary>
+/// <remarks>
+/// A third clock type rather than a reuse of the two above, because the
+/// messaging code takes .NET's own TimeProvider abstraction rather than either
+/// application's hand-rolled IClock - and converting between them would be
+/// more indirection than simply saying what the time is.
+/// </remarks>
+public sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
+{
+    public override DateTimeOffset GetUtcNow() => now;
+}
