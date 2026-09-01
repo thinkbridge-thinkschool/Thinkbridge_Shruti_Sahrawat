@@ -252,22 +252,46 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<QuotesDbContext>();
 
-    // SQL Server in production has no migrations of its own shipped in this
-    // project - the SQL-Server-native migration set proven by
-    // Quotes.Tests.Integration lives in that test assembly, which is not part
-    // of the deployed image. EnsureCreated() builds the schema directly from
-    // the current model instead, which sidesteps needing that assembly here
-    // at the cost of not tracking migration history for this provider - a
-    // fair trade for a database this API is not yet evolving incrementally
-    // in production. SQLite (everywhere so far) keeps using Migrate(),
-    // unchanged.
-    if (db.Database.IsSqlServer())
+    // How the schema arrives is a fact about the deployment, not about the
+    // provider, so it is an explicit setting like Database:Provider rather
+    // than something inferred - and for the same reason: an inference that
+    // is right in production and wrong everywhere else fails silently.
+    //
+    // Migrate() is the default and the right answer wherever a migration set
+    // for the live provider is on hand. That is SQLite everywhere so far, and
+    // it is also Quotes.Tests.Integration, which points this context at real
+    // SQL Server and supplies its own SQL-Server-native migrations from the
+    // test assembly.
+    //
+    // Azure SQL is the exception. No SQL-Server migration set ships inside
+    // this project - the one the integration tests prove lives in that test
+    // assembly, which is not part of the deployed image - so EnsureCreated()
+    // builds the schema straight from the model there, at the cost of not
+    // tracking migration history for this provider. A fair trade for a
+    // database this API is not yet evolving incrementally in production.
+    //
+    // Inferring EnsureCreated() from "the provider is SQL Server" is what
+    // broke the integration suite: EnsureCreated() is a no-op when the
+    // database already exists, and each test creates its own throwaway
+    // database before the host starts. Every table was therefore missing and
+    // every test failed in setup, in Program.cs rather than in test code.
+    var schemaBootstrap = app.Configuration["Database:SchemaBootstrap"]
+                          ?? (db.Database.IsSqlServer() ? "EnsureCreated" : "Migrate");
+
+    if (string.Equals(schemaBootstrap, "EnsureCreated", StringComparison.OrdinalIgnoreCase))
     {
         db.Database.EnsureCreated();
     }
-    else
+    else if (string.Equals(schemaBootstrap, "Migrate", StringComparison.OrdinalIgnoreCase))
     {
         db.Database.Migrate();
+    }
+    else
+    {
+        // Loud rather than falling back to a default. A typo here silently
+        // decides whether the schema exists at all.
+        throw new InvalidOperationException(
+            $"Database:SchemaBootstrap was '{schemaBootstrap}'. Expected 'Migrate' or 'EnsureCreated'.");
     }
 }
 

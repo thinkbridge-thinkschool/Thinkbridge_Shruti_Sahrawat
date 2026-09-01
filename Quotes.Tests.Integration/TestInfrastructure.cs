@@ -25,6 +25,8 @@ namespace Quotes.Tests.Integration;
 // set under Migrations/SqlServer (scaffolded fresh from the current model), not QuotesApi's
 // SQLite migrations — those bake in literal "TEXT"/"INTEGER" store types and a Sqlite-only
 // autoincrement annotation that don't produce a working schema on SQL Server.
+// The host applies them at startup because CreateFreshHost sets
+// Database:SchemaBootstrap to Migrate — see that setting below.
 internal static class TestInfrastructure
 {
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -91,7 +93,24 @@ internal static class TestInfrastructure
                     ["Serilog:MinimumLevel:Override:Microsoft"] = "Warning",
                     ["Serilog:MinimumLevel:Override:Microsoft.EntityFrameworkCore"] = "Warning",
                     ["Serilog:MinimumLevel:Override:Microsoft.EntityFrameworkCore.Database.Command"] = "Warning",
-                    ["Jwt:Key"] = TestSigningKey
+                    ["Jwt:Key"] = TestSigningKey,
+
+                    // The host must apply the SQL-Server migrations below, not
+                    // EnsureCreated() the schema from the model.
+                    //
+                    // Program.cs defaults SQL Server to EnsureCreated(), which
+                    // is correct for Azure SQL - no SQL-Server migration set
+                    // ships in the deployed image - and is a no-op here,
+                    // because CreateFreshHost has already issued CREATE
+                    // DATABASE. An existing database means EnsureCreated()
+                    // returns false and creates nothing, so every test would
+                    // run against an empty schema and fail registering its
+                    // first user.
+                    //
+                    // Unlike Jwt:Key above, this one does take effect:
+                    // Program.cs reads it from the *built* app's
+                    // configuration, after these delegates have been replayed.
+                    ["Database:SchemaBootstrap"] = "Migrate"
                 };
 
                 // Configuration arrays are flattened to indexed keys - the same
