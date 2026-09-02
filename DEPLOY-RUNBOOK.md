@@ -152,7 +152,36 @@ You running the real Lighthouse audit (Chrome DevTools → Lighthouse, or
 `npx lighthouse <url> --view`) and pasting the four category scores back is
 still the one thing only you can do here.
 
-## 8. Custom domain (skipped for this submission)
+## 8. Day 20 follow-up — run this before the next API deploy
+
+Day 20 added an `OutboxMessages` table to `QuotesApi`'s model, but the live
+Azure SQL database bootstraps its schema with `EnsureCreated()`, which is a
+no-op against a database that already has tables (see the comment in
+`QuotesApi/Program.cs` and `sql/add-outbox-table.sql` for the full reasoning).
+Deployed as-is, the table never gets created there, and the first
+`POST /api/quotes` after that deploy 500s on the outbox insert.
+
+Run once, before or immediately after deploying Day 20's code:
+
+```powershell
+sqlcmd -S sql-quotes2-qvdk5l.database.windows.net -d quotesdb -G -i sql\add-outbox-table.sql
+```
+
+(`-G` for Azure AD auth — swap in whatever this database's usual connection
+method is.) It's idempotent — safe to run again if you're not sure it already
+ran. **Paste back:** the `PRINT` output (`OutboxMessages created.` or
+`OutboxMessages already exists - nothing to do.`), then confirm with a real
+request:
+
+```powershell
+curl.exe -i -X POST https://quotes-api.blacksand-b575aaa0.southindia.azurecontainerapps.io/api/quotes `
+  -H "Content-Type: application/json" `
+  -d '{"author":"Deploy Check","text":"Outbox table smoke test."}'
+```
+
+A `201` (not a `500`) is the table existing and the transaction committing.
+
+## 9. Custom domain (skipped for this submission)
 
 You chose the default `*.azurestaticapps.net` domain. If you want a real
 domain later: `az staticwebapp hostname set --name <SWA_NAME>

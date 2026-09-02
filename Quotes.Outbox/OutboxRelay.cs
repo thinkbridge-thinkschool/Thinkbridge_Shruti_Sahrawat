@@ -81,9 +81,14 @@ public sealed class OutboxRelay
 
     /// <summary>
     /// Publishes up to <paramref name="batchSize"/> unsent rows, oldest first.
-    /// Each row's SaveChanges runs independently, so a failure partway through
-    /// the batch leaves every row before it marked sent and every row from it
-    /// onward untouched for the next poll - never a mix of "half written".
+    /// Each row's SaveChanges is meant to succeed or fail on its own, so a
+    /// failure partway through the batch leaves every row before it marked
+    /// sent and every row from it onward untouched for the next poll - never
+    /// a mix of "half written". That only holds because a failed row's entry
+    /// is explicitly reset to Unchanged in the catch below: all rows share
+    /// one <see cref="OutboxDbContext"/> and its change tracker, so without
+    /// that reset a row whose own SaveChanges just threw would stay Modified
+    /// and ride along on - or drag down - the next row's successful save.
     /// </summary>
     public async Task<IReadOnlyList<OutboxRelayResult>> RelayBatchAsync(int batchSize, CancellationToken cancellationToken)
     {
@@ -111,6 +116,20 @@ public sealed class OutboxRelay
             }
             catch (Exception ex)
             {
+                // If PublishOneAsync itself threw, row.SentAt was never touched and
+                // the entity is already Unchanged - this is a no-op. But if the
+                // publish succeeded and it was this row's own SaveChangesAsync that
+                // threw, row.SentAt is still set in memory and the entity is still
+                // tracked as Modified. Left alone, that dirty entity rides along on
+                // the next row's successful SaveChangesAsync in this same
+                // context - silently marking a row reported here as Failed as
+                // "sent" in the database, or worse, dragging a healthy row's save
+                // down with it if row's own data is what made the save fail.
+                // Reverting the in-memory value and detaching the entity is what
+                // keeps this row's fate solely in this catch block's hands.
+                row.SentAt = null;
+                _db.Entry(row).State = EntityState.Unchanged;
+
                 _logger.LogError(
                     ex,
                     "Publish failed for outbox id {OutboxId} messageId={MessageId}; leaving unsent for retry",

@@ -133,6 +133,16 @@ public sealed class OutboxRelayTests : IDisposable
         (await verifyAgain.Outbox.SingleAsync()).SentAt.Should().NotBeNull();
     }
 
+    /// <remarks>
+    /// The verification reads from a brand-new <see cref="OutboxDbContext"/>,
+    /// not the one the relay just used. All rows in a batch share one
+    /// context's change tracker, so asking that same, still-open context for
+    /// its rows would answer "what does the tracker believe" rather than
+    /// "what actually committed" - and a row whose entry was left Modified
+    /// after a failed SaveChanges (the bug this test exists to catch) would
+    /// look sent to that tracker even on the runs where it never made it to
+    /// the database at all.
+    /// </remarks>
     [Fact]
     public async Task RelayBatchAsync_WhenOneRowFailsToPublish_StillPublishesTheOthersInTheBatch()
     {
@@ -141,15 +151,18 @@ public sealed class OutboxRelayTests : IDisposable
 
         var publisher = new SelectivelyFailingPublisher(failOnMessageId: failingMessageId);
 
-        await using var outboxDb = _database.CreateOutboxContext();
-        var relay = new OutboxRelay(outboxDb, publisher, NullLogger<OutboxRelay>.Instance);
-        var results = await relay.RelayBatchAsync(batchSize: 10, CancellationToken.None);
+        await using (var outboxDb = _database.CreateOutboxContext())
+        {
+            var relay = new OutboxRelay(outboxDb, publisher, NullLogger<OutboxRelay>.Instance);
+            var results = await relay.RelayBatchAsync(batchSize: 10, CancellationToken.None);
 
-        results.Should().HaveCount(2);
-        results.Single(r => r.MessageId == failingMessageId).Outcome.Should().Be(OutboxRelayOutcome.Failed);
-        results.Single(r => r.MessageId == okMessageId).Outcome.Should().Be(OutboxRelayOutcome.Published);
+            results.Should().HaveCount(2);
+            results.Single(r => r.MessageId == failingMessageId).Outcome.Should().Be(OutboxRelayOutcome.Failed);
+            results.Single(r => r.MessageId == okMessageId).Outcome.Should().Be(OutboxRelayOutcome.Published);
+        }
 
-        var rows = await outboxDb.Outbox.ToListAsync();
+        await using var verify = _database.CreateOutboxContext();
+        var rows = await verify.Outbox.ToListAsync();
         rows.Single(r => r.MessageId == failingMessageId).SentAt.Should().BeNull();
         rows.Single(r => r.MessageId == okMessageId).SentAt.Should().NotBeNull();
     }

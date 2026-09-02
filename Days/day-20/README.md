@@ -116,14 +116,33 @@ broker out of order if one of them needed a retry. Nothing here depends on
 order - Day 19 already noted competing consumers destroy it too - but a
 workflow that did would need more than this relay provides.
 
-**Verification status.** This was built and reviewed in a sandboxed session
-with no network access to NuGet or the .NET install servers, so nothing here
-has been compiled or run yet in that environment - only read closely against
-the existing code it extends. `dotnet test Quotes.Tests.Unit` (which now also
-builds `Quotes.Outbox` via project reference) is the check that turns this
-from "read carefully" into "known to work"; run it, and `dotnet test
-Quotes.Tests.Integration` too, since the new `OutboxMessages` table needs its
-migration to apply cleanly against real SQL Server exactly as Day 19's tables
-did. Push to `main` and let CI confirm both before treating this as done -
-the same path that caught and then verified the fix to Day 19's own
-integration suite.
+**Verification status.** `dotnet test Quotes.Tests.Unit` and
+`dotnet test Quotes.Tests.Integration` both ran clean locally: 194/194 unit
+tests and 54/54 integration tests, including the new
+`OutboxWriteTests`/`OutboxRelayTests` above and the `OutboxMessages`
+migration applying against real SQL Server exactly as Day 19's tables did.
+CI run #85 on commit `563b311` is green on `main`.
+
+A review pass after that first green run found one real bug in
+`OutboxRelay.RelayBatchAsync`: all rows in a batch share one
+`OutboxDbContext`, so a row whose own `SaveChangesAsync` threw stayed tracked
+as `Modified` and could ride along on - or drag down - a later row's
+successful save in the same batch, even though it was reported here as
+`Failed`. Fixed by resetting that row's entry to `Unchanged` in the catch
+block; `RelayBatchAsync_WhenOneRowFailsToPublish_StillPublishesTheOthersInTheBatch`
+was also tightened to read its verification back from a fresh
+`OutboxDbContext` rather than the same tracked one the relay had just used,
+so a regression here fails the test again instead of passing by reading the
+in-memory tracker's optimistic view.
+
+**One deployment gap this exercise did not close.** `azure.yaml` sets
+`Database:Provider=SqlServer` but nothing sets `Database:SchemaBootstrap`,
+so `Program.cs` defaults Azure SQL to `EnsureCreated()` - and
+`EnsureCreated()` is a no-op against a database that already has tables,
+which this one does from Day 19. Deployed as-is, `OutboxMessages` is never
+created on the live database, and the first `POST /api/quotes` after deploy
+would 500 on the outbox insert. See `sql/add-outbox-table.sql` and the note
+in `DEPLOY-RUNBOOK.md` for the manual step this needs before the next
+deploy; a real fix would carry SQL Server migrations inside `QuotesApi`
+itself and switch Azure SQL to `Migrate()`, which is out of scope for what
+this exercise asked for.
