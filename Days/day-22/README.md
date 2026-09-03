@@ -219,30 +219,58 @@ honestly claim.
 
 ### Verification status
 
-`dotnet build` is clean. `dotnet test Quotes.Tests.Unit` passes 208/208 - 199
-from before this exercise plus the nine in
+`dotnet build` is clean. `dotnet test Quotes.Tests.Unit` passes 209/209 - 199
+from before this exercise plus the ten in
 [`OutboundResilienceTests`](../../Quotes.Tests.Unit/OutboundResilienceTests.cs)
 covering each primitive against the real pipeline (not a reimplementation of
 it): idempotent retry, suppressed retry on a bare POST, retried POST with a
 key, retried DELETE, no retry on a 400, the full breaker lifecycle
 (closed → open → half-open → closed, with the dependency proven uncalled
-while open), bulkhead rejection, the total budget bounding the whole
-operation rather than one attempt, and the config-time rejection of an
-attempt timeout that isn't smaller than the total. `dotnet test
+while open), bulkhead rejection, the total budget ending a call even when no
+single attempt times out, the total budget leaving room for more than one
+attempt before it expires, and the config-time rejection of an attempt
+timeout that isn't smaller than the total. `dotnet test
 Quotes.Tests.Integration` passes 54/54, unchanged - this exercise added no
 HTTP-level behaviour to any existing endpoint, so nothing there had reason to
 move.
 
-One test failure on the way here, fixed rather than worked around: the total-
-budget test originally set `TotalRequestTimeout` to an exact multiple of
-`AttemptTimeout` (800ms = 4 × 200ms), which put the total deadline and an
-in-flight attempt's own deadline on the same instant. Polly's inner timeout
-strategy checks whether the ambient token was *already* cancelled before its
-own timer fired to decide whether to claim a cancellation as its own; at a
-genuine tie, that check can go either way, so the attempt sometimes claimed
-it and retried again instead of letting the total budget end the operation -
-a flaky assertion, not a pipeline defect. Moving the total timeout to 900ms,
-comfortably mid-attempt rather than on a boundary, removed the tie entirely.
+Two test failures on the way here, both fixed rather than worked around, and
+both about the same underlying hazard: a single "total budget bounds the
+whole operation" test that asserted on *which* Polly strategy claimed a
+cancellation, rather than on the operation's actual, runner-independent
+behaviour. First locally: the test set `TotalRequestTimeout` to an exact
+multiple of `AttemptTimeout` (800ms = 4 × 200ms), putting the total
+deadline and an in-flight attempt's own deadline on the same instant.
+Polly's inner timeout strategy checks whether the ambient token was
+*already* cancelled before its own timer fired to decide whether to claim a
+cancellation as its own; at a genuine tie, that check can go either way, so
+the attempt sometimes claimed it and retried again instead of letting the
+total budget end the operation. Moving the total timeout to 900ms,
+comfortably mid-attempt rather than on a boundary, fixed it on a dedicated
+Windows machine in both Debug and Release - but it re-surfaced on CI, on a
+shared Linux runner, as `AttemptTimeouts` coming back `0` instead of the
+expected `2` or more: proof that the total timeout's cancellation fired
+before even one attempt-level timeout got the chance to be attributed,
+which a 900ms-vs-200ms margin cannot survive once a contended runner delays
+a timer callback by more than a few hundred milliseconds. The real fix
+was not a third number - it was to stop depending on which timer wins at
+all. The single test is now two, and the first attempt at splitting it made
+a wrong assumption of its own: setting the attempt timeout to ten seconds
+against a 500ms total budget is rejected outright by
+`OutboundResilienceOptions.Validate()`, because an attempt timeout that
+isn't strictly smaller than the total can never fire first - that guard
+exists precisely to catch this shape of misconfiguration, and it caught it
+here too, in a test, before it could reach anything real. The corrected
+version keeps that invariant and proves the same thing a different way: an
+upstream that fails fast (a 503 in ~50ms, nowhere near its own 300ms
+attempt timeout) is retried without backoff against a 700ms total budget,
+so roughly a dozen ordinary, individually-fast attempts accumulate past the
+budget - no single attempt ever times out on its own, only their sum does,
+which is the actual Day 5 gap. The second test proves the companion fact -
+that the budget leaves room for more than one attempt, not just one - with
+a ten-second total against four 100ms-attempt-timeout retries (400ms of
+expected work), asserting on the attempt count directly rather than on
+which Polly strategy gets credit for ending the call.
 
 Real numbers throughout: the breaker-lifecycle output above is a real run
 against the real stub, and the counters in it were independently reconstructed

@@ -223,33 +223,36 @@ public class OutboundResilienceTests : IDisposable
     // -------------------------------------------------------------- timeouts
 
     [Fact]
-    public async Task TheTotalBudget_BoundsTheWholeOperation_NotJustOneAttempt()
+    public async Task TheTotalBudget_EndsTheCall_EvenWhenNoSingleAttemptTimesOut()
     {
+        // The Day 5 gap, restated: a timeout that only ever watches one
+        // attempt lets the *operation* run far longer than the number in
+        // its name, because nothing is watching the sum. An attempt timeout
+        // that is not strictly smaller than the total budget is rejected by
+        // OutboundResilienceOptions.Validate() (it could never fire first,
+        // which is a misconfiguration, not a scenario to test), so this
+        // cannot be proven by making the attempt timeout too large to fire.
+        // Instead, the attempt timeout is real and comfortably larger than
+        // any single attempt here takes (300ms against ~50ms of actual
+        // work) - no individual attempt ever comes close to it - and it is
+        // the *accumulation* of many such attempts, each one a fast,
+        // ordinary retry, that the total budget has to catch. There is no
+        // millisecond tie for a slow runner to win here: with roughly
+        // fourteen attempts expected inside the 700ms budget, the total
+        // timeout firing mid-flight during *some* attempt is the only
+        // possible outcome, whichever attempt that turns out to be.
         var upstream = new ScriptedUpstream(async (_, cancellationToken) =>
         {
-            await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
-            return new HttpResponseMessage(HttpStatusCode.OK);
+            await Task.Delay(TimeSpan.FromMilliseconds(50), cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
         });
 
         var harness = Build(
             TestOptions(options =>
             {
-                options.AttemptTimeout = TimeSpan.FromMilliseconds(200);
-                // Deliberately not a multiple of AttemptTimeout. At an exact
-                // multiple (800ms, say), the total budget's own deadline and
-                // the in-flight attempt's deadline land on the same instant,
-                // and Polly's own inner timeout strategy can win that race:
-                // it checks whether the ambient token was cancelled before
-                // its own timer fired, and at a genuine tie that check can go
-                // either way, so the attempt claims the cancellation as its
-                // own and retries again rather than letting the total budget
-                // be the one to end it. 900ms lands 100ms into the fifth
-                // attempt's window - comfortably past the fourth attempt's
-                // 800ms boundary and comfortably before the fifth's own
-                // 1000ms one - so the total timeout is unambiguously what
-                // fires, which is the thing this test exists to prove.
-                options.TotalRequestTimeout = TimeSpan.FromMilliseconds(900);
-                options.MaxRetryAttempts = 10;
+                options.AttemptTimeout = TimeSpan.FromMilliseconds(300);
+                options.TotalRequestTimeout = TimeSpan.FromMilliseconds(700);
+                options.MaxRetryAttempts = 100;
                 options.RetryBaseDelay = TimeSpan.Zero;
             }),
             upstream);
@@ -259,19 +262,65 @@ public class OutboundResilienceTests : IDisposable
         stopwatch.Stop();
 
         result.Outcome.Should().Be(UpstreamOutcome.TimedOut);
-
-        // Day 5's finding, closed. Eleven attempts at a 200ms attempt timeout
-        // is more than two seconds of work; the caller waits for the budget,
-        // not for the attempts. The bound is loose because CI machines are
-        // slow, not because the mechanism is.
         stopwatch.Elapsed.Should().BeLessThan(
             TimeSpan.FromSeconds(5),
-            "the total budget has to bound the retry loop, or it is not a budget");
+            "the total budget has to bound the call, or it is not a budget");
 
         var snapshot = harness.Metrics.Snapshot();
-        snapshot.AttemptTimeouts.Should().BeGreaterThanOrEqualTo(
-            2, "more than one attempt should have been made and abandoned inside the budget");
-        snapshot.TotalTimeouts.Should().Be(1);
+        snapshot.TotalTimeouts.Should().Be(
+            1, "the total budget is what ended this call");
+        snapshot.AttemptTimeouts.Should().Be(
+            0, "every attempt finished in about 50ms, nowhere near its own 300ms timeout - only the accumulation of retries exhausted the total budget");
+        upstream.Calls.Should().BeGreaterThanOrEqualTo(
+            2, "the total budget should have allowed more than one attempt before it ended the call");
+    }
+
+    [Fact]
+    public async Task TheTotalBudget_LeavesRoomForMoreThanOneAttempt()
+    {
+        // The companion proof: the total budget does not mean "one attempt
+        // only" - it means attempts keep happening, each bounded by its own
+        // attempt timeout, until either one succeeds or the budget runs
+        // out. This is asserted on the thing that is actually true
+        // regardless of runner speed - how many attempts were made - rather
+        // than on which Polly strategy claims credit for stopping the
+        // operation, which is what made the previous version of this test
+        // flaky on a contended CI box. The total budget here (10s) is
+        // ~25x the four attempts it needs to allow (4 x 100ms = 400ms), so
+        // there is no realistic amount of scheduler jitter that turns this
+        // into a race either.
+        var upstream = new ScriptedUpstream(async (_, cancellationToken) =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+
+        var harness = Build(
+            TestOptions(options =>
+            {
+                options.AttemptTimeout = TimeSpan.FromMilliseconds(100);
+                options.TotalRequestTimeout = TimeSpan.FromSeconds(10);
+                options.MaxRetryAttempts = 3;
+                options.RetryBaseDelay = TimeSpan.Zero;
+            }),
+            upstream);
+
+        var stopwatch = Stopwatch.StartNew();
+        var result = await harness.Client.GetStatusAsync(CancellationToken.None);
+        stopwatch.Stop();
+
+        result.Outcome.Should().Be(UpstreamOutcome.TimedOut);
+        stopwatch.Elapsed.Should().BeLessThan(
+            TimeSpan.FromSeconds(5),
+            "the total budget is ten seconds, but the four attempts should exhaust in well under one");
+
+        var snapshot = harness.Metrics.Snapshot();
+        upstream.Calls.Should().Be(
+            4, "one initial attempt plus three retries, each abandoned at its own attempt timeout");
+        snapshot.AttemptTimeouts.Should().Be(
+            4, "every attempt individually timed out - none of them ever reached the dependency's five-second delay");
+        snapshot.TotalTimeouts.Should().Be(
+            0, "four attempts of 100ms each is nowhere near the ten-second total budget");
     }
 
     [Fact]
