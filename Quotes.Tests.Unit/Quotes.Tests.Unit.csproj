@@ -13,6 +13,11 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="FluentAssertions" Version="8.10.0" />
+    <!-- Day 21: CollectionSummaryCacheTests resolves a real HybridCache from a
+         real ServiceCollection. The package flows transitively from QuotesApi,
+         but this test project calls AddHybridCache directly, so it states the
+         dependency it uses rather than relying on another project keeping it. -->
+    <PackageReference Include="Microsoft.Extensions.Caching.Hybrid" Version="10.9.0" />
     <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.9.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="NSubstitute" Version="6.2.0" />

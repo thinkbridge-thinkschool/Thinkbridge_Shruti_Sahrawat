@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
+using QuotesApi.Caching;
 using QuotesApi.Models;
 using QuotesApi.Repositories;
 using QuotesApi.Services;
@@ -70,7 +71,12 @@ public static class EndpointExtensions
                 : Results.Ok(QuoteResponse.FromEntity(quote));
         });
 
-        group.MapDelete("/{id:int}", async (int id, ClaimsPrincipal principal, IQuoteRepository repo, CancellationToken ct) =>
+        group.MapDelete("/{id:int}", async (
+            int id,
+            ClaimsPrincipal principal,
+            IQuoteRepository repo,
+            ICollectionSummaryCacheInvalidator summaryCache,
+            CancellationToken ct) =>
         {
             var userId = principal.UserId();
             if (userId is null) return Results.Unauthorized();
@@ -104,6 +110,25 @@ public static class EndpointExtensions
             }
 
             var deleted = await repo.DeleteAsync(id, ct);
+
+            if (deleted)
+            {
+                // Day 21. A collection summary embeds the author and text of
+                // the quotes in its preview, and GetCollectionSummariesHandler
+                // drops preview entries whose quote no longer exists. So
+                // deleting a quote changes the correct answer for any cached
+                // summary that was previewing it - and without this the
+                // deleted quote keeps appearing on the collections screen
+                // until the entry expires.
+                //
+                // POST deliberately does not do this. A newly created quote is
+                // in no collection yet, so it cannot appear in any preview,
+                // and invalidating the whole summary cache on every quote
+                // creation would throw away a warm cache for a write that
+                // provably cannot have changed what it holds.
+                await summaryCache.InvalidateAsync(ct);
+            }
+
             return deleted
                 ? Results.NoContent()
                 : Results.NotFound(new ProblemDetails { Title = "Quote not found", Status = 404, Detail = $"No quote with id {id}." });

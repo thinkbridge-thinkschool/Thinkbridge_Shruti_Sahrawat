@@ -1,5 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using QuotesApi.Caching;
 using QuotesApi.Data;
 using QuotesApi.Repositories;
 
@@ -24,7 +25,7 @@ public static class InfrastructureExtensions
         var provider = configuration["Database:Provider"] ?? "Sqlite";
         var useSqlServer = string.Equals(provider, "SqlServer", StringComparison.OrdinalIgnoreCase);
 
-        services.AddDbContext<QuotesDbContext>(options =>
+        services.AddDbContext<QuotesDbContext>((sp, options) =>
         {
             if (useSqlServer)
             {
@@ -33,6 +34,17 @@ public static class InfrastructureExtensions
             else
             {
                 options.UseSqlite(connectionString);
+            }
+
+            // Day 21: counts every command EF actually executes, which is what
+            // the cache measurement is claimed against. Resolved rather than
+            // required, so a host that wires infrastructure without
+            // AddQuotesCaching still builds a DbContext - it just counts
+            // nothing.
+            var commandCounter = sp.GetService<DbCommandCounterInterceptor>();
+            if (commandCounter is not null)
+            {
+                options.AddInterceptors(commandCounter);
             }
 
             if (isDevelopment)

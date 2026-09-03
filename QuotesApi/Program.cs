@@ -135,6 +135,12 @@ builder.Services.AddHealthChecks();
 builder.Services.AddControllers();
 builder.Services.AddInfrastructure(builder.Configuration, builder.Environment.IsDevelopment());
 builder.Services.AddEndpointsApiExplorer();
+// Day 21: HybridCache in front of GET /api/collections/summaries, with
+// stampede protection so a cold cache under load issues one set of queries
+// rather than one per concurrent request. Redis is optional - see
+// Extensions/CachingExtensions.cs.
+builder.Services.AddQuotesCaching(builder.Configuration);
+
 builder.Services.AddScoped<ICollectionRepository, CollectionRepository>();
 builder.Services.AddSingleton<IClock, SystemClock>();
 
@@ -335,5 +341,6 @@ app.MapAuthEndpoints();
 app.MapQuoteEndpoints();
 app.MapProfilingEndpoints();
 app.MapControllers();
+app.MapCacheDiagnosticsEndpoints();
 
 app.Run();

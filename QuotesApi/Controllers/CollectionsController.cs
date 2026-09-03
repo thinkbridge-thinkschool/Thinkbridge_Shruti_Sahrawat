@@ -1,5 +1,6 @@
 ﻿using MediatR;
 using Microsoft.AspNetCore.Mvc;
+using QuotesApi.Caching;
 using QuotesApi.DTOs;
 using QuotesApi.Features.Collections;
 using QuotesApi.Repositories;
@@ -10,13 +11,39 @@ namespace QuotesApi.Controllers;
 [Route("api/[controller]")]
 public class CollectionsController : ControllerBase
 {
+    // Day 21: bounds on the two values that become part of a cache key. See
+    // GetSummaries for why caching is what made these worth enforcing.
+    private const int MinPreviewSize = 1;
+    private const int MaxPreviewSize = 25;
+    private const int MaxOwnerIdLength = 64;
+
     private readonly IMediator _mediator;
     private readonly ICollectionRepository _repository;
+    private readonly ICollectionSummaryReader _summaries;
+    private readonly ICollectionSummaryCacheInvalidator _cache;
 
-    public CollectionsController(IMediator mediator, ICollectionRepository repository)
+    // Day 21 added the last two. The reader is what the cached read path is
+    // behind; the invalidator is called by every action on this controller
+    // that changes what a summary would say.
+    //
+    // Invalidation lives here rather than in the command handlers because the
+    // three write paths do not share one chokepoint today: CreateCollection
+    // and AddQuote go through MediatR, RemoveQuote goes straight to the
+    // repository. Putting it in the two handlers would silently miss the
+    // third, which is the failure that shows up as a stale screen nobody can
+    // reproduce. Once RemoveQuote moves onto MediatR too, a post-processor or
+    // a notification is the better home for this and the controller goes back
+    // to not knowing a cache exists.
+    public CollectionsController(
+        IMediator mediator,
+        ICollectionRepository repository,
+        ICollectionSummaryReader summaries,
+        ICollectionSummaryCacheInvalidator cache)
     {
         _mediator = mediator;
         _repository = repository;
+        _summaries = summaries;
+        _cache = cache;
     }
 
     // READ PATH - goes to the query handler, which projects straight from the
@@ -27,8 +54,32 @@ public class CollectionsController : ControllerBase
         [FromQuery] int previewSize = 3,
         CancellationToken cancellationToken = default)
     {
-        var summaries = await _mediator.Send(
-            new GetCollectionSummariesQuery(ownerId, previewSize), cancellationToken);
+        // Day 21. Both parameters are bounded before they reach the reader,
+        // because caching changed what an unbounded parameter costs. This
+        // endpoint is anonymous, and every distinct (ownerId, previewSize)
+        // pair mints a new cache entry - in memory, and in Redis when it is
+        // configured. Uncached, a caller passing a thousand different ownerId
+        // values bought a thousand queries and nothing else; cached, it also
+        // buys a thousand resident entries that nothing evicts before their
+        // expiry. Caching turned a load problem into a memory-growth one, so
+        // the guard belongs with the change that introduced it.
+        //
+        // previewSize is clamped rather than rejected: it feeds a Take() in
+        // the query, so an absurd value is a real cost on the database too,
+        // and a caller asking for 10,000 preview items has not made a request
+        // worth honouring literally.
+        if (previewSize < MinPreviewSize) previewSize = MinPreviewSize;
+        if (previewSize > MaxPreviewSize) previewSize = MaxPreviewSize;
+
+        if (ownerId is { Length: > MaxOwnerIdLength })
+        {
+            return Problem(
+                detail: $"ownerId cannot be longer than {MaxOwnerIdLength} characters.",
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Bad Request");
+        }
+
+        var summaries = await _summaries.GetAsync(ownerId, previewSize, cancellationToken);
 
         return Ok(summaries);
     }
@@ -58,6 +109,11 @@ public class CollectionsController : ControllerBase
             var id = await _mediator.Send(
                 new CreateCollectionCommand(dto.Name, dto.OwnerId), cancellationToken);
 
+            // A new collection changes the unfiltered summary list and that
+            // owner's filtered one, so every cached variant is dropped rather
+            // than trying to reason about which keys this affected.
+            await _cache.InvalidateAsync(cancellationToken);
+
             return CreatedAtAction(nameof(GetById), new { id }, new { id });
         }
         catch (InvalidOperationException ex)
@@ -74,6 +130,14 @@ public class CollectionsController : ControllerBase
         {
             var found = await _mediator.Send(
                 new AddQuoteToCollectionCommand(id, quoteId), cancellationToken);
+
+            // Only on an actual write. Invalidating after a not-found would
+            // throw away a warm cache because somebody asked for a collection
+            // that does not exist.
+            if (found)
+            {
+                await _cache.InvalidateAsync(cancellationToken);
+            }
 
             return found ? NoContent() : NotFound();
         }
@@ -105,6 +169,11 @@ public class CollectionsController : ControllerBase
         {
             collection.RemoveItem(quoteId);
             await _repository.UpdateAsync(collection, cancellationToken);
+
+            // The path that does not go through MediatR - and so the one a
+            // handler-level invalidation would have missed.
+            await _cache.InvalidateAsync(cancellationToken);
+
             return Ok(collection);
         }
         catch (InvalidOperationException ex)

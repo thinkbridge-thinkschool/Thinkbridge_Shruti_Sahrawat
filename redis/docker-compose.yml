@@ -1,0 +1,29 @@
+# Redis as HybridCache's L2 for Day 21.
+#
+# Deliberately tiny next to servicebus-emulator/docker-compose.yml, and that
+# contrast is the point: Service Bus needed an emulator because topics do not
+# exist locally, whereas Redis is the same Redis everywhere. Nothing here is a
+# stand-in for a cloud service - it is the service.
+#
+# The API does not require this to be running. With Cache:RedisConnectionString
+# unset (the default), HybridCache runs L1-only and still gives stampede
+# protection; see QuotesApi/Extensions/CachingExtensions.cs.
+name: quotes-redis
+
+services:
+  redis:
+    container_name: quotes-redis
+    image: redis:7-alpine
+    pull_policy: missing
+    ports:
+      - "6379:6379"
+    # No persistence, no password: this holds cache entries that are all
+    # reconstructible from the database by definition, on a port bound to
+    # localhost only. Anything worth persisting or protecting does not belong
+    # in here in the first place.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
