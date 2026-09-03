@@ -83,7 +83,16 @@ otel
         }
     });
 
-// Named HttpClient with Polly-backed resilience (retry, circuit breaker, timeout).
+// Day 5: named HttpClient with Polly-backed resilience (retry, circuit breaker,
+// per-attempt timeout).
+//
+// Superseded by Day 22, and kept rather than deleted because Day 5's write-up
+// cites this wiring and ResilienceHandlerTests still asserts against it -
+// removing it would delete the evidence behind an earlier submission. It is
+// left exactly as it was, including the two things Day 22 exists to fix: it
+// retries every method, POST included, and its only timeout is per-attempt, so
+// the caller has no total budget. Nothing in the application calls it; the
+// outbound dependency now goes through IUpstreamClient.
 builder.Services.AddHttpClient("my-service", client =>
     {
         client.Timeout = TimeSpan.FromSeconds(30);
@@ -140,6 +149,12 @@ builder.Services.AddEndpointsApiExplorer();
 // rather than one per concurrent request. Redis is optional - see
 // Extensions/CachingExtensions.cs.
 builder.Services.AddQuotesCaching(builder.Configuration);
+
+// Day 22: the outbound dependency behind a Polly pipeline - bulkhead, total
+// timeout, idempotent-only retry, circuit breaker, per-attempt timeout. See
+// Extensions/ResilienceExtensions.cs for the wiring and
+// Resilience/OutboundResiliencePipeline.cs for why the order is what it is.
+builder.Services.AddOutboundResilience(builder.Configuration);
 
 builder.Services.AddScoped<ICollectionRepository, CollectionRepository>();
 builder.Services.AddSingleton<IClock, SystemClock>();
@@ -342,5 +357,10 @@ app.MapQuoteEndpoints();
 app.MapProfilingEndpoints();
 app.MapControllers();
 app.MapCacheDiagnosticsEndpoints();
+
+// Day 22. The stub upstream is the dependency the pipeline calls; the
+// diagnostics endpoints are what perf/breaker-timeline.ps1 drives and reads.
+app.MapUpstreamStubEndpoints();
+app.MapResilienceDiagnosticsEndpoints();
 
 app.Run();
