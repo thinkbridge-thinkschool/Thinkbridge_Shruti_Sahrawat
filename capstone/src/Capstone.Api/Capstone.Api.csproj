@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <!--
+    The composition root, and the only project in the solution permitted to
+    reference an Infrastructure assembly. Every other project references
+    abstractions or another module's Contracts. Capstone.ArchitectureTests
+    enforces that; this comment only explains it.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\Modules\Catalog\Capstone.Catalog.Infrastructure\Capstone.Catalog.Infrastructure.csproj" />
+    <ProjectReference Include="..\Modules\Curation\Capstone.Curation.Application\Capstone.Curation.Application.csproj" />
+    <ProjectReference Include="..\Modules\Curation\Capstone.Curation.Infrastructure\Capstone.Curation.Infrastructure.csproj" />
+    <ProjectReference Include="..\Modules\Sharing\Capstone.Sharing.Application\Capstone.Sharing.Application.csproj" />
+    <ProjectReference Include="..\Modules\Sharing\Capstone.Sharing.Infrastructure\Capstone.Sharing.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

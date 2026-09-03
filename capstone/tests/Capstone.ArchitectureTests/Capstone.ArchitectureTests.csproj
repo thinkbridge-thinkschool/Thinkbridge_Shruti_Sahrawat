@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FluentAssertions" Version="8.10.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <!--
+    This project references every capstone assembly on purpose - it has to load
+    them to inspect them. It is the one exception to the rules it enforces, and
+    it is exempt for the same reason a test can call an internal method: it is
+    not part of the shipped dependency graph.
+
+    No NetArchTest or similar. The rules below are reflection over
+    Assembly.GetReferencedAssemblies() and XML over the .csproj files, which is
+    a dozen lines either way, has no version to keep current, and produces a
+    failure message that names the exact reference rather than a rule id.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Capstone.Api\Capstone.Api.csproj" />
+    <ProjectReference Include="..\..\src\Capstone.SharedKernel\Capstone.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Catalog\Capstone.Catalog.Contracts\Capstone.Catalog.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Catalog\Capstone.Catalog.Infrastructure\Capstone.Catalog.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Curation\Capstone.Curation.Application\Capstone.Curation.Application.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Curation\Capstone.Curation.Contracts\Capstone.Curation.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Curation\Capstone.Curation.Domain\Capstone.Curation.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Curation\Capstone.Curation.Infrastructure\Capstone.Curation.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Sharing\Capstone.Sharing.Application\Capstone.Sharing.Application.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Sharing\Capstone.Sharing.Infrastructure\Capstone.Sharing.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

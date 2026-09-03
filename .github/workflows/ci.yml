@@ -60,6 +60,47 @@ jobs:
             ${{ matrix.project }}/TestResults/**/coverage.cobertura.xml
           if-no-files-found: error
 
+  # Day 22 capstone. A separate job rather than a fourth matrix leg, and
+  # deliberately without --collect:"XPlat Code Coverage", so it produces no
+  # coverage-* artifact and cannot reach the gate below.
+  #
+  # Two reasons it stays out of the 80% union. The coverage <Include> filter in
+  # coverlet.runsettings is an allowlist - [QuotesApi]*,[OrderRefactor]* - so a
+  # capstone report would be empty anyway. And a kickoff scaffold is mostly
+  # seams by design: counting its in-memory stubs against a threshold Day 4
+  # worked hard to make honest would corrupt the number in the direction that
+  # is hardest to notice, by making it easy to hit.
+  #
+  # What this job does gate is the thing that matters for a modular monolith:
+  # Capstone.ArchitectureTests fails if any module references another module's
+  # internals, so the boundaries are enforced on every push rather than in code
+  # review.
+  capstone:
+    name: Capstone (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project:
+          - capstone/tests/Capstone.Curation.Domain.Tests
+          - capstone/tests/Capstone.ArchitectureTests
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore ${{ matrix.project }}
+
+      - name: Build
+        run: dotnet build ${{ matrix.project }} --no-restore --configuration Release
+
+      - name: Test
+        run: dotnet test ${{ matrix.project }} --no-build --configuration Release
+
   # The gate runs once, on the union of all three reports. Gating each project
   # separately asks the unit suite to cover Program.cs, which it never executes -
   # a threshold no honest test can reach. See scripts/check-coverage.py.

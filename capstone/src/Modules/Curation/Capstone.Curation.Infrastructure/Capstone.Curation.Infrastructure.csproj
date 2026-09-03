@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\Capstone.SharedKernel\Capstone.SharedKernel.csproj" />
+    <ProjectReference Include="..\Capstone.Curation.Domain\Capstone.Curation.Domain.csproj" />
+    <ProjectReference Include="..\Capstone.Curation.Application\Capstone.Curation.Application.csproj" />
+    <ProjectReference Include="..\Capstone.Curation.Contracts\Capstone.Curation.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

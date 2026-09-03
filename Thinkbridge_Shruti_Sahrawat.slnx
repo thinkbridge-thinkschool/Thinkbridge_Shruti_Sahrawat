@@ -7,4 +7,16 @@
   <Project Path="Quotes.Tests.Unit/Quotes.Tests.Unit.csproj" />
   <Project Path="Quotes.Worker/Quotes.Worker.csproj" />
   <Project Path="QuotesApi/QuotesApi.csproj" />
+  <Project Path="capstone/src/Capstone.Api/Capstone.Api.csproj" />
+  <Project Path="capstone/src/Capstone.SharedKernel/Capstone.SharedKernel.csproj" />
+  <Project Path="capstone/src/Modules/Catalog/Capstone.Catalog.Contracts/Capstone.Catalog.Contracts.csproj" />
+  <Project Path="capstone/src/Modules/Catalog/Capstone.Catalog.Infrastructure/Capstone.Catalog.Infrastructure.csproj" />
+  <Project Path="capstone/src/Modules/Curation/Capstone.Curation.Application/Capstone.Curation.Application.csproj" />
+  <Project Path="capstone/src/Modules/Curation/Capstone.Curation.Contracts/Capstone.Curation.Contracts.csproj" />
+  <Project Path="capstone/src/Modules/Curation/Capstone.Curation.Domain/Capstone.Curation.Domain.csproj" />
+  <Project Path="capstone/src/Modules/Curation/Capstone.Curation.Infrastructure/Capstone.Curation.Infrastructure.csproj" />
+  <Project Path="capstone/src/Modules/Sharing/Capstone.Sharing.Application/Capstone.Sharing.Application.csproj" />
+  <Project Path="capstone/src/Modules/Sharing/Capstone.Sharing.Infrastructure/Capstone.Sharing.Infrastructure.csproj" />
+  <Project Path="capstone/tests/Capstone.ArchitectureTests/Capstone.ArchitectureTests.csproj" />
+  <Project Path="capstone/tests/Capstone.Curation.Domain.Tests/Capstone.Curation.Domain.Tests.csproj" />
 </Solution>

@@ -2,6 +2,10 @@
 
 ## Day 22 — Resilience with Polly
 
+*Day 22 had two exercises. This is the first; the second — the capstone
+kickoff, its one-page design and the scaffolded modular monolith — is in
+[`capstone/`](../../capstone/README.md).*
+
 Wrap an outbound dependency with Polly: retry-with-backoff (idempotent only),
 a circuit breaker, a timeout, and a bulkhead. Prove the circuit opens under
 sustained failure and recovers.
