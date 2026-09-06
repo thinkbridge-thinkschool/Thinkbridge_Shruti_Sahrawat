@@ -1,0 +1,293 @@
+// =============================================================================
+// Day 23 - the Quotes stack as code.
+//
+// Subscription-scoped on purpose. A resource-group-scoped template can only
+// deploy *into* a group somebody already made, which leaves the first and most
+// consequential resource in the stack - the group itself, its name, its region,
+// its tags - as the one thing still created by hand in the portal. Deploying at
+// subscription scope means `what-if` can be run against a name that does not
+// exist yet and still print a complete plan, which is exactly the property that
+// makes a review of a *new* environment possible before it costs anything.
+//
+// Nothing in this file is secret. The API reaches SQL and Service Bus with a
+// user-assigned managed identity, so there is no password, no connection-string
+// key and no `@secure()` parameter anywhere in the stack - see
+// modules/identity.bicep for why that identity is created first and passed
+// around rather than being minted inside whichever module happens to need it.
+// =============================================================================
+
+targetScope = 'subscription'
+
+import { topicSubscription, sqlSku } from 'types.bicep'
+
+// -----------------------------------------------------------------------------
+// Shape of the environment
+// -----------------------------------------------------------------------------
+
+@description('Which parameter file is driving this deployment. Only used for tagging and naming - every behavioural difference between dev and prod is an explicit parameter below, never an `if (environmentName == ...)` branch buried in a module.')
+@allowed([
+  'dev'
+  'prod'
+])
+param environmentName string
+
+@description('Azure region for every resource in the stack. southindia is where the Day 5 container app already lives; Static Web Apps (Day 17) is deliberately not in this template - it has its own deploy path and its own short list of supported regions.')
+param location string
+
+@description('Resource group to create and deploy into. Named explicitly rather than derived, because the name of the thing that holds everything else is not a detail to leave to a naming function.')
+param resourceGroupName string
+
+@description('Prefix for generated resource names.')
+@minLength(3)
+@maxLength(10)
+param namePrefix string = 'quotes'
+
+@description('Tags applied to the resource group and inherited by every module.')
+param tags object = {}
+
+// A short, deterministic suffix so globally-unique names (SQL server, Service
+// Bus namespace) do not collide with someone else's in the same region. Derived
+// from the subscription and group name, so re-running this template for the same
+// environment produces the same names - a random suffix would make every
+// deployment look like a brand-new stack to `what-if`.
+var resourceToken = toLower(uniqueString(subscription().id, resourceGroupName, environmentName))
+
+var defaultTags = union(tags, {
+  environment: environmentName
+  workload: namePrefix
+  managedBy: 'bicep'
+})
+
+// Resolved names. Explicit parameter wins; otherwise the generated name. This
+// indirection is what lets the same template either stand up a fresh
+// environment or be pointed at resources that already exist under names nobody
+// chose with a naming convention in mind.
+var resolvedSqlServerName = empty(sqlServerName) ? '${namePrefix}-sql-${environmentName}-${resourceToken}' : sqlServerName
+var resolvedServiceBusNamespaceName = empty(serviceBusNamespaceName) ? '${namePrefix}-sb-${environmentName}-${resourceToken}' : serviceBusNamespaceName
+
+// -----------------------------------------------------------------------------
+// SQL
+// -----------------------------------------------------------------------------
+
+@description('Azure SQL logical server name. Globally unique. Left empty, it is generated from the prefix, the environment and a deterministic token - a parameter default cannot reference a variable, which is why the fallback lives in a var below rather than here.')
+param sqlServerName string = ''
+
+@description('Database name. Kept identical across environments so a connection string differs only by server, never by database.')
+param sqlDatabaseName string = 'quotesdb'
+
+@description('Display name of the Entra ID principal that administers the server. This is a human (or group) name, not a credential.')
+param sqlAadAdminLogin string
+
+@description('Object ID of that Entra ID principal. Supplied from the environment at deploy time (see the .bicepparam files) so no directory object ID is committed to the repo.')
+@minLength(36)
+@maxLength(36)
+param sqlAadAdminObjectId string
+
+@description('Whether the admin principal is a User, Group or Application. A group is the better answer for anything shared; User is the honest answer for a one-person exercise.')
+@allowed([
+  'User'
+  'Group'
+  'Application'
+])
+param sqlAadAdminPrincipalType string = 'User'
+
+@description('Database SKU. A full object rather than a name, because Basic takes no `family` and General Purpose requires one - flattening this to a string would need a lookup table that lies the first time a tier is added.')
+param sqlDatabaseSku sqlSku
+
+@description('Max database size in bytes.')
+param sqlDatabaseMaxSizeBytes int
+
+@description('Allow other Azure services (including Container Apps) to reach the server. This is the 0.0.0.0 firewall rule, which is broader than it looks - it admits every Azure tenant, not just this one. It is on here because the container app has no fixed outbound IP and no private endpoint in this stack; the note in the write-up says what replaces it.')
+param sqlAllowAzureServices bool = true
+
+// -----------------------------------------------------------------------------
+// Service Bus
+// -----------------------------------------------------------------------------
+
+@description('Service Bus namespace name. Globally unique. Generated when left empty, same as the SQL server name.')
+param serviceBusNamespaceName string = ''
+
+@description('Namespace SKU. Topics do not exist on Basic at all, so Standard is the floor for Day 19 to work.')
+@allowed([
+  'Standard'
+  'Premium'
+])
+param serviceBusSku string
+
+@description('Messaging units. Premium only; ignored on Standard.')
+param serviceBusCapacity int = 1
+
+@description('Topic name. Matches ServiceBus:TopicName in Quotes.Worker/appsettings.json.')
+param serviceBusTopicName string = 'quote-events'
+
+@description('Subscriptions on the topic. `sqlFilter` empty means "take everything" - see modules/servicebus.bicep for why an empty filter is not the same as no rule.')
+param serviceBusSubscriptions topicSubscription[]
+
+// -----------------------------------------------------------------------------
+// API (Container App)
+// -----------------------------------------------------------------------------
+
+@description('Container app name.')
+param apiName string = '${namePrefix}-api'
+
+@description('Image the API runs. Dev defaults to a public placeholder because a container app cannot be created pointing at an image that does not exist yet, and the real image is pushed by a separate deploy step, not by this template.')
+param apiContainerImage string
+
+@description('Login server of the registry holding the image, e.g. myregistry.azurecr.io. Empty for a public image.')
+param containerRegistryLoginServer string = ''
+
+@description('Resource ID of that registry, when it lives outside this stack. Supplying it grants this stack\'s identity AcrPull on it, so pulling the image needs no admin user, no password and no portal click.')
+param containerRegistryResourceId string = ''
+
+@description('Floor on replicas. 0 lets dev scale to nothing and cost nothing; anything above 1 means the Day 21 HybridCache L1 is per-replica, which is a real behavioural difference and not just a cost knob.')
+@minValue(0)
+param apiMinReplicas int
+
+@minValue(1)
+param apiMaxReplicas int
+
+@description('vCPU per replica, as a string because Bicep has no decimal type - `json()` converts it in the module.')
+param apiCpu string
+
+@description('Memory per replica. Container Apps requires a fixed cpu:memory ratio; 0.5/1Gi and 1.0/2Gi are both valid pairs.')
+param apiMemory string
+
+@description('Concurrent requests per replica before another replica is added.')
+param apiConcurrentRequests int = 50
+
+@description('How the API creates its schema on startup. Read by Program.cs as Database:SchemaBootstrap and validated there - a typo throws rather than silently picking a default.')
+@allowed([
+  'Migrate'
+  'EnsureCreated'
+])
+param apiSchemaBootstrap string
+
+@description('ASPNETCORE_ENVIRONMENT for the container.')
+param apiAspNetCoreEnvironment string = 'Production'
+
+@description('Log Analytics retention. The workspace is part of the API module because a container apps environment cannot exist without one.')
+@minValue(30)
+@maxValue(730)
+param logAnalyticsRetentionInDays int
+
+// =============================================================================
+// Resource group
+// =============================================================================
+
+resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
+  name: resourceGroupName
+  location: location
+  tags: defaultTags
+}
+
+// =============================================================================
+// Modules, in dependency order
+//
+// identity first, because both data-plane modules need a principal to grant to
+// and the API needs a client ID to put in its connection string. Creating the
+// identity inside the API module instead would force SQL and Service Bus to
+// depend on the API, which is backwards: the API is the thing that depends on
+// them.
+// =============================================================================
+
+module identity 'modules/identity.bicep' = {
+  scope: rg
+  name: 'identity'
+  params: {
+    name: '${namePrefix}-id-${environmentName}'
+    location: location
+    tags: defaultTags
+  }
+}
+
+module sql 'modules/sql.bicep' = {
+  scope: rg
+  name: 'sql'
+  params: {
+    serverName: resolvedSqlServerName
+    databaseName: sqlDatabaseName
+    location: location
+    tags: defaultTags
+    aadAdminLogin: sqlAadAdminLogin
+    aadAdminObjectId: sqlAadAdminObjectId
+    aadAdminPrincipalType: sqlAadAdminPrincipalType
+    databaseSku: sqlDatabaseSku
+    maxSizeBytes: sqlDatabaseMaxSizeBytes
+    allowAzureServices: sqlAllowAzureServices
+  }
+}
+
+module serviceBus 'modules/servicebus.bicep' = {
+  scope: rg
+  name: 'servicebus'
+  params: {
+    namespaceName: resolvedServiceBusNamespaceName
+    location: location
+    tags: defaultTags
+    skuName: serviceBusSku
+    capacity: serviceBusCapacity
+    topicName: serviceBusTopicName
+    subscriptions: serviceBusSubscriptions
+    principalId: identity.outputs.principalId
+  }
+}
+
+// Only when the image comes from a private registry this stack does not own.
+// Scoped to the registry's own resource group, which is the whole reason main
+// is subscription-scoped: a group-scoped template cannot grant a role on a
+// resource that lives somewhere else without a second, manual deployment.
+module registryAccess 'modules/registry-access.bicep' = if (!empty(containerRegistryResourceId)) {
+  scope: resourceGroup(split(containerRegistryResourceId, '/')[4])
+  name: 'registry-access'
+  params: {
+    registryName: last(split(containerRegistryResourceId, '/'))
+    principalId: identity.outputs.principalId
+  }
+}
+
+module api 'modules/api.bicep' = {
+  scope: rg
+  name: 'api'
+  params: {
+    name: apiName
+    location: location
+    tags: defaultTags
+    environmentName: '${namePrefix}-env-${environmentName}'
+    logAnalyticsName: '${namePrefix}-logs-${environmentName}'
+    logAnalyticsRetentionInDays: logAnalyticsRetentionInDays
+    identityResourceId: identity.outputs.resourceId
+    identityClientId: identity.outputs.clientId
+    containerImage: apiContainerImage
+    containerRegistryLoginServer: containerRegistryLoginServer
+    minReplicas: apiMinReplicas
+    maxReplicas: apiMaxReplicas
+    cpu: apiCpu
+    memory: apiMemory
+    concurrentRequests: apiConcurrentRequests
+    sqlServerFqdn: sql.outputs.fullyQualifiedDomainName
+    sqlDatabaseName: sql.outputs.databaseName
+    serviceBusFqdn: serviceBus.outputs.fullyQualifiedNamespace
+    schemaBootstrap: apiSchemaBootstrap
+    aspNetCoreEnvironment: apiAspNetCoreEnvironment
+  }
+  dependsOn: [
+    registryAccess
+  ]
+}
+
+// =============================================================================
+// Outputs - the values the next step needs, so nobody has to go and read them
+// out of the portal.
+// =============================================================================
+
+output resourceGroupName string = rg.name
+output apiFqdn string = api.outputs.fqdn
+output apiHealthUrl string = 'https://${api.outputs.fqdn}/health'
+output apiResourceId string = api.outputs.resourceId
+output sqlServerFqdn string = sql.outputs.fullyQualifiedDomainName
+output sqlDatabaseName string = sql.outputs.databaseName
+output serviceBusFqdn string = serviceBus.outputs.fullyQualifiedNamespace
+output serviceBusTopic string = serviceBus.outputs.topicName
+output managedIdentityClientId string = identity.outputs.clientId
+output managedIdentityPrincipalId string = identity.outputs.principalId
+output managedIdentityName string = identity.outputs.name

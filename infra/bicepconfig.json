@@ -1,0 +1,54 @@
+{
+  "$schema": "https://aka.ms/bicep/config-schema.json",
+
+  "//": [
+    "Linter settings for this folder. The defaults run most rules at 'warning',",
+    "which means a template can compile clean while still carrying a hardcoded",
+    "location or a secret in a parameter default. Everything that describes a",
+    "real mistake is raised to 'error' here, so `bicep build` fails on it and CI",
+    "does not need a separate rule about reading warnings carefully."
+  ],
+
+  "analyzers": {
+    "core": {
+      "enabled": true,
+      "rules": {
+        "adminusername-should-not-be-literal": { "level": "error" },
+        "artifacts-parameters": { "level": "warning" },
+        "decompiler-cleanup": { "level": "error" },
+        "explicit-values-for-loc-params": { "level": "warning" },
+        "max-outputs": { "level": "error" },
+        "max-params": { "level": "warning" },
+        "max-resources": { "level": "error" },
+        "max-variables": { "level": "error" },
+        "no-conflicting-metadata": { "level": "error" },
+        "no-deployments-resources": { "level": "error" },
+        "no-hardcoded-env-urls": { "level": "error" },
+        "no-hardcoded-location": { "level": "error" },
+        "no-loc-expr-outside-params": { "level": "error" },
+        "no-unnecessary-dependson": { "level": "error" },
+        "no-unused-existing-resources": { "level": "error" },
+        "no-unused-imports": { "level": "error" },
+        "no-unused-params": { "level": "error" },
+        "no-unused-vars": { "level": "error" },
+        "outputs-should-not-contain-secrets": { "level": "error" },
+        "prefer-interpolation": { "level": "error" },
+        "prefer-unquoted-property-names": { "level": "error" },
+        "protect-commandtoexecute-secrets": { "level": "error" },
+        "secure-parameter-default": { "level": "error" },
+        "secure-params-in-nested-deploy": { "level": "error" },
+        "secure-secrets-in-params": { "level": "error" },
+        "simplify-interpolation": { "level": "error" },
+        "simplify-json-null": { "level": "error" },
+        "use-parent-property": { "level": "warning" },
+        "use-recent-api-versions": { "level": "off" },
+        "use-resource-id-functions": { "level": "error" },
+        "use-resource-symbol-reference": { "level": "error" },
+        "use-safe-access": { "level": "error" },
+        "use-secure-value-for-secure-inputs": { "level": "error" },
+        "use-stable-resource-identifiers": { "level": "error" },
+        "use-stable-vm-image": { "level": "error" }
+      }
+    }
+  }
+}

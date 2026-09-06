@@ -26,6 +26,7 @@ Quick navigation into each day's brief, code, and evidence. The full narrative (
 | 21 | HybridCache + stampede protection | [`Days/day-21/`](day-21/README.md) |
 | 22 | Resilience with Polly | [`Days/day-22/`](day-22/README.md) |
 | 22 | Capstone kickoff: design + scaffold | [`capstone/`](../capstone/README.md) |
+| 23 | Bicep IaC | [`Days/day-23/`](day-23/README.md) |
 
 Day 6 was a holiday — no exercise that day.
 

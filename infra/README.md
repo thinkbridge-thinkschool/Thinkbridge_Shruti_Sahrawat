@@ -1,0 +1,139 @@
+# infra/ — the Quotes stack as Bicep
+
+Everything in this folder describes infrastructure. Nothing in it is applied
+automatically: the CI job (`.github/workflows/infra.yml`) builds and lints the
+templates and never touches a subscription, and a deployment only happens when
+somebody runs one of the commands below.
+
+| File | What it is |
+|---|---|
+| [`main.bicep`](main.bicep) | Subscription-scoped entry point. Creates the resource group, then calls every module in dependency order. |
+| [`types.bicep`](types.bicep) | Shared user-defined types, so a malformed parameter file fails at `bicep build` instead of halfway through a deployment. |
+| [`modules/identity.bicep`](modules/identity.bicep) | The one user-assigned managed identity everything authenticates as. |
+| [`modules/sql.bicep`](modules/sql.bicep) | Azure SQL logical server + database, Entra-ID-only authentication. |
+| [`modules/servicebus.bicep`](modules/servicebus.bicep) | Namespace, the `quote-events` topic, its subscriptions and filters, and the data-plane role assignments. |
+| [`modules/api.bicep`](modules/api.bicep) | The API container app, its managed environment and its Log Analytics workspace. |
+| [`modules/registry-access.bicep`](modules/registry-access.bicep) | AcrPull on a registry outside this stack. Deployed only when a registry resource ID is supplied. |
+| [`main.dev.bicepparam`](main.dev.bicepparam) | dev values. Cheap, disposable, scales to zero. |
+| [`main.prod.bicepparam`](main.prod.bicepparam) | prod values. Valid and type-checked; never deployed — see the header in that file. |
+| [`bicepconfig.json`](bicepconfig.json) | Linter settings. Most rules raised from warning to error. |
+| [`scripts/create-sql-user.sql`](scripts/create-sql-user.sql) | The one step Bicep cannot express: the managed identity's database user. |
+
+## Before you run anything
+
+Two values come from your own directory rather than from this repo, so no
+directory object ID is committed here:
+
+```powershell
+$env:SQL_AAD_ADMIN_LOGIN     = az ad signed-in-user show --query userPrincipalName -o tsv
+$env:SQL_AAD_ADMIN_OBJECT_ID = az ad signed-in-user show --query id -o tsv
+```
+
+If either is unset, the build fails with `BCP333` before reaching Azure —
+`sqlAadAdminObjectId` is constrained to 36 characters precisely so an unset
+variable cannot become a deployment with a broken administrator.
+
+## Plan (changes nothing)
+
+```powershell
+az deployment sub what-if `
+  --name quotes-dev-plan `
+  --location southindia `
+  --template-file infra/main.bicep `
+  --parameters infra/main.dev.bicepparam
+```
+
+`what-if` creates nothing and costs nothing. If it errors with
+`ResourceGroupNotFound`, create the (empty, free) group first and re-run —
+what-if evaluates nested group-scoped deployments against a group that has to
+exist:
+
+```powershell
+az group create --name rg-quotes-dev --location southindia
+```
+
+## Deploy
+
+```powershell
+az deployment sub create `
+  --name quotes-dev `
+  --location southindia `
+  --template-file infra/main.bicep `
+  --parameters infra/main.dev.bicepparam
+```
+
+Then the step that is not Bicep — the managed identity's database user:
+
+```powershell
+$outputs = az deployment sub show --name quotes-dev --query properties.outputs -o json | ConvertFrom-Json
+sqlcmd -S $outputs.sqlServerFqdn.value -d $outputs.sqlDatabaseName.value -G `
+  -v identityName=$($outputs.managedIdentityName.value) `
+  -i infra/scripts/create-sql-user.sql
+```
+
+Then push the real image and point the app at it:
+
+```powershell
+az deployment sub create `
+  --name quotes-dev `
+  --location southindia `
+  --template-file infra/main.bicep `
+  --parameters infra/main.dev.bicepparam `
+  --parameters apiContainerImage=<registry>/quotes-api:<tag> `
+               containerRegistryLoginServer=<registry> `
+               containerRegistryResourceId=<full registry resource ID>
+```
+
+Supplying `containerRegistryResourceId` is what grants this stack's identity
+AcrPull on a registry it does not own — without it the container app is created
+pointing at an image it cannot pull, and reports that fact long after the
+deployment says it succeeded.
+
+## Confirming the filter actually filters
+
+The `$Default` rule on a subscription holds a TrueFilter that matches
+everything. `modules/servicebus.bicep` overwrites it rather than adding a
+second rule beside it, because Service Bus ORs rules together — a filter added
+alongside `$Default` changes nothing at all and looks completely correct in the
+portal. Worth confirming after a deploy rather than trusting the template:
+
+```powershell
+az servicebus topic subscription rule list `
+  --resource-group rg-quotes-dev `
+  --namespace-name <namespace> `
+  --topic-name quote-events `
+  --subscription-name search-indexer `
+  -o table
+```
+
+One rule named `$Default`, `filterType` of `SqlFilter`, and the expression
+`eventType = 'QuoteCreated'`. Two rules — or one named `$Default` with a
+TrueFilter — means the indexer is receiving every event.
+
+## What this template does not do
+
+- **It does not adopt the existing `rg-thinkschool-dev2` resources.** Those were
+  created by `azd` under generated names. Pointing these parameters at them
+  (`resourceGroupName`, `sqlServerName`, `serviceBusNamespaceName`,
+  `apiName`) makes `what-if` an adoption report — useful, and the honest way to
+  find out what adoption would change — but running the *deployment* would
+  overwrite properties `azd` owns, including rolling the container app back to
+  whatever image the parameters name. Plan first; do not deploy into that group
+  without reading the plan line by line.
+- **It does not switch the existing database to `Migrate`.** The dev parameters
+  set `Database:SchemaBootstrap=Migrate`, which is correct for a database this
+  template creates: it starts empty and every migration, `AddOutbox` included,
+  applies cleanly. The `azd`-created database was bootstrapped with
+  `EnsureCreated()` and therefore has no `__EFMigrationsHistory` table, so the
+  first migration there would try to create tables that already exist. That
+  database stays on `EnsureCreated` plus [`sql/add-outbox-table.sql`](../sql/add-outbox-table.sql);
+  see Day 20.
+- **It does not create the Static Web App.** Day 17's frontend has its own
+  deploy path (`.github/workflows/deploy-swa.yml`) and a region list that does
+  not include `southindia`. Folding it in here would mean a template whose
+  location parameter is a lie for one of its resources.
+- **It does not put SQL behind a private endpoint.** `sqlAllowAzureServices`
+  opens the `0.0.0.0` rule, which admits Azure traffic from *any* tenant, not
+  just this one. The real fix is VNet integration for the container app plus a
+  private endpoint on the server, and it is a larger change than this exercise
+  covers — named here rather than left as a comfortable default.

@@ -1,0 +1,68 @@
+name: Infra (Bicep)
+
+# Separate from ci.yml, and path-scoped, for the same reason deploy-swa.yml is:
+# a change to QuotesApi has nothing to say about whether the templates compile,
+# and a change to the templates has nothing to say about whether the tests pass.
+#
+# This job builds and lints only - it never touches a subscription, needs no
+# Azure credentials, and cannot deploy anything. What it prevents is the failure
+# mode that makes IaC worse than the portal: a template that is committed,
+# reviewed, merged, and then found to be invalid by the person who was counting
+# on it three weeks later.
+on:
+  push:
+    paths:
+      - 'infra/**'
+      - '.github/workflows/infra.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'infra/**'
+      - '.github/workflows/infra.yml'
+
+jobs:
+  build:
+    name: Build and lint templates
+    runs-on: ubuntu-latest
+
+    # Placeholders, and only shaped like the real thing. main.bicep constrains
+    # sqlAadAdminObjectId to 36 characters, which makes an unset value a *build*
+    # error rather than a deployment that gets halfway and then fails on an
+    # invalid administrator - good behaviour at deploy time, and the reason this
+    # job has to supply something. The real values come from the operator's own
+    # shell (see infra/README.md); nothing here grants access to anything.
+    env:
+      SQL_AAD_ADMIN_LOGIN: placeholder@example.invalid
+      SQL_AAD_ADMIN_OBJECT_ID: '00000000-0000-0000-0000-000000000000'
+      API_CONTAINER_IMAGE: 'mcr.microsoft.com/k8se/quickstart:latest'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bicep
+        run: az bicep install && az bicep version
+
+      # Compiles main.bicep and, transitively, every module it references.
+      # bicepconfig.json raises the linter's own rules to error, so a warning
+      # about a hardcoded location or an unused parameter fails here rather than
+      # scrolling past in someone's terminal.
+      - name: Build templates
+        run: az bicep build --file infra/main.bicep --stdout > /dev/null
+
+      - name: Lint modules
+        run: |
+          set -euo pipefail
+          for f in infra/modules/*.bicep infra/types.bicep; do
+            echo "linting $f"
+            az bicep lint --file "$f"
+          done
+
+      # Type-checks both parameter files against the template: a missing
+      # property, a misspelled key or an int written as a string fails here.
+      - name: Type-check parameter files
+        run: |
+          set -euo pipefail
+          for p in infra/main.dev.bicepparam infra/main.prod.bicepparam; do
+            echo "checking $p"
+            az bicep build-params --file "$p" --stdout > /dev/null
+          done
