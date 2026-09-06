@@ -249,7 +249,7 @@ it three weeks later.
 
 ### Verification status
 
-Everything that can be checked without a subscription has been, in this
+Everything that can be checked without a subscription was checked in the build
 environment, with Bicep CLI 0.46.1:
 
 - `bicep build main.bicep` — exit 0, no warnings, under the strict
@@ -261,9 +261,55 @@ environment, with Bicep CLI 0.46.1:
   filter expression intact).
 - The four injected-mistake cases above, plus the passing control.
 
-**What has not been run: `az deployment sub what-if` against a real
-subscription.** This environment has no Azure credentials and no `az`/`azd` on
-any reachable path — the same constraint Day 17 recorded, and for the same
-reason. The exact command is in [`infra/README.md`](../../infra/README.md); its
-output belongs in this section, and this line stays here until it is pasted in
-rather than being replaced by a claim that the plan looked fine.
+**`az deployment sub what-if` has now been run for real**, against
+`rg-quotes-dev` in `southindia`, on a subscription this repo already uses.
+Output, redacted only where noted:
+
+```
+Resource changes: 4 to create, 1 to modify.
+
+  ~ resourceGroups/rg-quotes-dev [2024-03-01]
+      + tags: costCentre, environment, managedBy, owner, workload
+
+  + Microsoft.ManagedIdentity/userAssignedIdentities/quotes-id-dev
+  + Microsoft.Sql/servers/quotes-sql-dev-e6oljhc2krrhe
+      properties.administrators.azureADOnlyAuthentication: true
+      properties.administrators.login: "*******"        <- CLI's own redaction
+      properties.administrators.sid: "82378627-..."
+      properties.minimalTlsVersion: "1.2"
+  + Microsoft.Sql/servers/.../databases/quotesdb
+      sku.name: "Basic", properties.maxSizeBytes: 2147483648
+  + Microsoft.Sql/servers/.../firewallRules/AllowAllWindowsAzureIps
+      properties.startIpAddress / endIpAddress: "0.0.0.0"
+
+Diagnostics (2):
+  (NestedDeploymentShortCircuited) A nested deployment got short-circuited
+  and all its resources got skipped from validation. This is due to a nested
+  template having a parameter that was not fully evaluated (e.g. contains a
+  reference() function). — reported against the `servicebus` and `api`
+  module deployments.
+```
+
+Confirms the four things worth confirming on a first plan: the identity, the
+Entra-ID-only SQL server (`azureADOnlyAuthentication: true`, no
+`administratorLogin`/password anywhere in the diff), the `Basic` database at
+the dev size, and the `0.0.0.0` firewall rule — exactly, and only, the
+resources the plan should show for a brand-new environment.
+
+**The two diagnostics are a real, worth-knowing ARM limitation, not a broken
+template.** `servicebus` and `api` each take `principalId`/`identityClientId`
+as `identity.outputs.principalId`/`.clientId` — values that do not exist as
+concrete strings until the `identity` module has actually deployed. `what-if`
+evaluates the whole graph *without deploying anything*, so when a nested
+module's input is a `reference()` to a sibling resource that is not yet real,
+ARM cannot resolve it to a value and — rather than guess — skips validating
+everything inside that module and says so explicitly, rather than silently
+approving or silently failing. This is documented, expected behaviour for any
+multi-module template wiring one module's output into another's input on a
+*first* deployment into a brand-new environment (see the link ARM prints:
+`aka.ms/WhatIfEvalStopped`), not something this template did wrong — and it
+resolves itself the moment `identity` is real: rerunning `what-if` after the
+first `deployment sub create` would fully evaluate `servicebus` and `api` too,
+because `principalId` would then be a concrete GUID instead of an unresolved
+reference. Worth stating plainly rather than either hiding the diagnostic or
+overclaiming the plan proved more than it did.
