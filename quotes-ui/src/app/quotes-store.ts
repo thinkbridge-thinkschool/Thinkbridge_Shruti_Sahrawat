@@ -94,6 +94,25 @@ export class QuotesStore {
     return `/api/quotes?${params.toString()}`;
   });
 
+  /**
+   * `resource.value()` guarded against the one status it throws for.
+   *
+   * `hasValue()` is `false` — and safe to read — for both "mid-refetch" and
+   * "the request failed", but only the second of those actually throws out
+   * of `value()` itself (a terminal error status). Reproduced live with an
+   * expired token: `listState()` already special-cases loading and error
+   * before anything reads a quote out of the payload, but `visibleQuotes()`
+   * and `totalCount()` are read unconditionally by the template (the pager
+   * is outside the `@switch`), so an error status threw during signal
+   * recomputation before the 'error' branch — and its "session expired"
+   * message — ever rendered. This is the one place that has to know
+   * `value()` can throw; everything below keeps reading "no payload right
+   * now" the same way it already did mid-refetch.
+   */
+  private readonly safeValue = computed<PagedResult<Quote> | undefined>(() =>
+    this.resource.hasValue() ? this.resource.value() : undefined,
+  );
+
   // ---- optimistic mutation state ---------------------------------------
 
   /**
@@ -116,7 +135,7 @@ export class QuotesStore {
    * imperative version had a bug and this one structurally cannot.
    */
   private readonly removedIds = linkedSignal<PagedResult<Quote> | undefined, ReadonlySet<number>>({
-    source: () => this.resource.value(),
+    source: () => this.safeValue(),
     computation: (payload, previous) => {
       const prev = previous?.value ?? EMPTY_IDS;
 
@@ -140,7 +159,7 @@ export class QuotesStore {
   // ---- derived ---------------------------------------------------------
 
   /** What the server last returned for the current page, minus optimistic removals. */
-  private readonly serverItems = computed<Quote[]>(() => this.resource.value()?.items ?? []);
+  private readonly serverItems = computed<Quote[]>(() => this.safeValue()?.items ?? []);
 
   private readonly presentItems = computed<Quote[]>(() => {
     const removed = this.removedIds();
@@ -169,7 +188,7 @@ export class QuotesStore {
    * value forward rather than falling back to a zero that is not true.
    */
   private readonly serverTotal = linkedSignal<number | undefined, number>({
-    source: () => this.resource.value()?.totalCount,
+    source: () => this.safeValue()?.totalCount,
     computation: (incoming, previous) => incoming ?? previous?.value ?? 0,
   });
 

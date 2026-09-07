@@ -128,6 +128,22 @@ describe('QuotesStore', () => {
       expect(store.listState()).toBe('error');
     });
 
+    it('is error on a 401 without visibleQuotes()/totalCount() throwing', async () => {
+      // httpResource's value() throws once the resource reaches a terminal
+      // error status — reproduced live with an expired token: the list
+      // request 401s, and reading visibleQuotes()/totalCount() (which the
+      // template does unconditionally, in the pager, even in the 'error'
+      // branch) threw during signal recomputation instead of ever reaching
+      // the "session expired" UI quotes-list.ts already has for this case.
+      listRequest().flush({ title: 'Unauthorized' }, { status: 401, statusText: 'Unauthorized' });
+      await settle();
+
+      expect(store.listState()).toBe('error');
+      expect(store.statusCode()).toBe(401);
+      expect(() => store.visibleQuotes()).not.toThrow();
+      expect(() => store.totalCount()).not.toThrow();
+    });
+
     it('is no-matches when the filter excludes every row — distinct from no-data', async () => {
       await loadInitial([quote(1, 'Ada Lovelace'), quote(2, 'Alan Turing')]);
 
