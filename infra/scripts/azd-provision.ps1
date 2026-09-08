@@ -55,6 +55,58 @@ if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
     $PSNativeCommandUseErrorActionPreference = $false
 }
 
+<#
+Runs a native command whose output this script captures or discards, and
+returns its stdout lines. $LASTEXITCODE is left intact for the caller to check.
+
+This exists because of a Windows PowerShell 5.1 behaviour that is easy to get
+backwards, and this script got it backwards once already. In 5.1, redirecting a
+native command's stderr - `2>$null` included - wraps that stderr in an
+ErrorRecord, and an ErrorRecord under $ErrorActionPreference = 'Stop' is
+terminating. So `azd env get-value X 2>$null` does not quietly ignore azd's
+chatter; it converts that chatter into a fatal error. azd writes "Update
+available: ..." to stderr on *every* invocation, which made the redirection a
+coin flip on whether a new azd release had shipped - and it landed the wrong
+way on 1.31.1 -> 1.33.0, killing the run after both azd variables had already
+been written.
+
+Leaving stderr unredirected would also work on 5.1 (it prints to the console
+and creates no error record), but then azd's update banner and any real
+diagnostic are indistinguishable from this script's own output. Relaxing the
+preference for the duration of the call is the fix that keeps both properties:
+stderr stays suppressed, and suppressing it is not fatal. PowerShell 7 does not
+need this, and is unharmed by it.
+#>
+function Invoke-NativeCapture {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][scriptblock]$Command)
+
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & $Command 2>$null
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+
+    # Native output arrives as lines; blank ones carry no information and a
+    # trailing newline is normal, so they are dropped rather than returned as
+    # an empty-string "value" a caller would treat as set.
+    return @($output | Where-Object { "$_".Trim() -ne '' })
+}
+
+# `azd env get-value` for a key that is not set exits non-zero. That is not an
+# error at either call site below - both are asking "is this set?" - so the
+# exit code becomes $null rather than a throw.
+function Get-AzdValue {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Key)
+
+    $lines = Invoke-NativeCapture { azd env get-value $Key }
+    if ($LASTEXITCODE -ne 0) { return $null }
+    return ($lines | Select-Object -Last 1)
+}
+
 # 1. Parameters file first - before azd is invoked at all.
 & (Join-Path $PSScriptRoot 'select-bicepparam.ps1') -EnvironmentName $Environment
 
@@ -64,7 +116,7 @@ if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
 #    behind a brand-new, empty environment.
 azd env select $Environment
 if ($LASTEXITCODE -ne 0) {
-    throw "azd env select '$Environment' failed. Create it first: azd env new $Environment --location southindia"
+    throw "azd env select '$Environment' failed. Create it first: azd env new $Environment --location centralindia"
 }
 
 # 3. If borrowing an environment, find it now and hand azd the two values the
@@ -80,8 +132,8 @@ if ($ReuseManagedEnvironment) {
     # be in the app's own subscription, so a mismatch here produces a
     # perfectly well-formed ID that fails at deploy time - and azd already
     # knows the right answer.
-    $subscriptionId = azd env get-value AZURE_SUBSCRIPTION_ID
-    if ($LASTEXITCODE -ne 0 -or -not $subscriptionId) {
+    $subscriptionId = Get-AzdValue AZURE_SUBSCRIPTION_ID
+    if (-not $subscriptionId) {
         throw "Could not read AZURE_SUBSCRIPTION_ID from azd environment '$Environment'. Set it with: azd env set AZURE_SUBSCRIPTION_ID <id>"
     }
 
@@ -97,10 +149,11 @@ if ($ReuseManagedEnvironment) {
     # and $existing[0] fail - on the single-environment case that is the whole
     # point of this switch. Forcing an array makes the count checks below mean
     # what they say regardless of which PowerShell is running the script.
-    $existing = @(az containerapp env list --subscription $subscriptionId --query "[].{id:id,location:location,name:name,state:properties.provisioningState}" -o json | ConvertFrom-Json)
+    $envJson = Invoke-NativeCapture { az containerapp env list --subscription $subscriptionId --query "[].{id:id,location:location,name:name,state:properties.provisioningState}" -o json }
     if ($LASTEXITCODE -ne 0) {
-        throw "az containerapp env list failed. Is the Azure CLI logged in to the right subscription (az account show)?"
+        throw "az containerapp env list failed for subscription $subscriptionId. Is the Azure CLI logged in (az account show)?"
     }
+    $existing = @(($envJson -join "`n") | ConvertFrom-Json)
     if ($existing.Count -eq 0) {
         throw "-ReuseManagedEnvironment was passed but this subscription has no managed environment to reuse. Drop the switch and let the stack create its own."
     }
@@ -108,14 +161,16 @@ if ($ReuseManagedEnvironment) {
         # Not a real state on this subscription - it is capped at one - but an
         # arbitrary pick from several is exactly the kind of decision a script
         # should refuse to make on someone's behalf.
-        # Built in two statements on purpose: in PowerShell `+` binds tighter
-        # than `-join`, so writing this as one expression joins the *result* of
-        # concatenating a string onto an array - which happens to produce
-        # something readable, and is not what it looks like it says.
-        # Both variables, not just the ID: setting the ID alone leaves
-        # API_LOCATION empty, the app deploys in the stack's region, and Azure
-        # rejects it for not matching its environment's - the exact failure
-        # this block exists to prevent.
+        #
+        # The remediation names both variables, not just the ID: setting the ID
+        # alone leaves API_LOCATION empty, the app deploys in the stack's region,
+        # and Azure rejects it for not matching its environment's - the exact
+        # failure this whole block exists to prevent.
+        #
+        # Built as two statements because `+` binds tighter than `-join` in
+        # PowerShell, so the one-expression version joins the *result* of
+        # concatenating a string onto an array. It reads fine and is not what it
+        # says.
         $options = ($existing | ForEach-Object {
             "  azd env set EXISTING_CONTAINERAPP_ENV_ID $($_.id)$([Environment]::NewLine)  azd env set API_LOCATION $($_.location)"
         }) -join ([Environment]::NewLine * 2)
@@ -156,8 +211,7 @@ if ($ReuseManagedEnvironment) {
     # Absent AZURE_LOCATION is not an error - `azd env new` without --location
     # leaves it unset - so the exit code is read and discarded rather than
     # checked. This whole block is a note to the operator, not a gate.
-    $stackLocation = azd env get-value AZURE_LOCATION 2>$null
-    if ($LASTEXITCODE -ne 0) { $stackLocation = $null }
+    $stackLocation = Get-AzdValue AZURE_LOCATION
     if ($stackLocation -and $stackLocation -ne $env0.location) {
         Write-Host "`nnote: container app -> $($env0.location) (its environment's region), everything else -> $stackLocation."
         Write-Host "      that cross-region hop from app to SQL is deliberate and documented; southindia cannot host a new SQL server on this subscription."
@@ -171,8 +225,7 @@ if ($ReuseManagedEnvironment) {
     # "already exists in location ..." rather than doing it. Recreating is the
     # only route, and azure.yaml's denyDelete blocks the delete half of that.
     # So: warn loudly, do not silently attempt it.
-    $priorEnvId = azd env get-value EXISTING_CONTAINERAPP_ENV_ID 2>$null
-    if ($LASTEXITCODE -ne 0) { $priorEnvId = $null }
+    $priorEnvId = Get-AzdValue EXISTING_CONTAINERAPP_ENV_ID
     if ($priorEnvId) {
         Write-Warning "This environment was last provisioned with -ReuseManagedEnvironment. Dropping the switch changes the container app's environmentId and region, both immutable - expect ARM to refuse rather than migrate. Re-run with -ReuseManagedEnvironment, or tear down first with: azd down --force --purge"
     }
@@ -184,8 +237,8 @@ if ($ReuseManagedEnvironment) {
     # to unset as far as the parameter files are concerned
     # (`readEnvironmentVariable(..., '')`), so if a given azd build refuses to
     # store one, the fallback is already the behaviour this wants.
-    azd env set EXISTING_CONTAINERAPP_ENV_ID "" 2>$null | Out-Null
-    azd env set API_LOCATION "" 2>$null | Out-Null
+    Invoke-NativeCapture { azd env set EXISTING_CONTAINERAPP_ENV_ID "" } | Out-Null
+    Invoke-NativeCapture { azd env set API_LOCATION "" } | Out-Null
 }
 
 # 4. Provision. Deployment Stacks come from azure.yaml's infra.deploymentStacks

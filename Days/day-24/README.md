@@ -2,9 +2,10 @@
 
 Deploys the Day 23 stack (`infra/main.bicep`) through `azd` instead of raw
 `az deployment sub` commands, wrapped in an Azure Deployment Stack. Dev was
-run for real against the actual subscription; prod is planned. Eight
-findings came out of it — six from running it, and two from re-reading the
-fix for the sixth against the live system it was about to deploy next to.
+run for real against the actual subscription; prod is planned. Nine
+findings came out of it: six from running it, two from re-reading the fix
+for the sixth against the live system it was about to deploy beside, and one
+from that fix's first real run.
 
 The last of them changed the template. Dev's first real run reached a
 genuine, subscription-wide ceiling — this subscription permits exactly one
@@ -130,8 +131,9 @@ currently selected.
 ## How far dev got, and what it took to get the rest of the way
 
 Six problems surfaced running this against the actual subscription, each
-below with its transcript. A seventh change fixed the worst of them, and an
-eighth finding is the bug that fix introduced. Two of them were regional or quota limits that
+below with its transcript. A seventh change fixed the worst of them;
+findings 8 and 9 are the two bugs that fix introduced, one found by review
+and one by running it. Two of them were regional or quota limits that
 no static check can see; three were azd behaviours that are wrong in ways
 that look right; one was a stale file that planned the wrong environment
 and reported success.
@@ -526,6 +528,72 @@ unmanaged is exactly why nothing would stop it. The script now refuses that
 case instead of relying on the live environment happening to live in
 `rg-thinkschool-dev2`.
 
+### Finding 9 — `2>$null` is not "ignore this" on Windows PowerShell
+
+The first real run of `-ReuseManagedEnvironment` got all the way through
+discovery and then died on the script's own error handling:
+
+```
+reusing 'cae-jlwf2oyjdsjjg' in South India [state: Succeeded]
+  /subscriptions/109b67f4-.../resourceGroups/rg-thinkschool-dev2/providers/Microsoft.App/managedEnvironments/cae-jlwf2oyjdsjjg
+
+azd : Update available: 1.31.1 -> 1.33.0
+At C:\Users\dell\thinkschool\repo-live\infra\scripts\azd-provision.ps1:159 char:22
++     $stackLocation = azd env get-value AZURE_LOCATION 2>$null
++                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + FullyQualifiedErrorId : NativeCommandError
+```
+
+The thing that killed the run was an *advertisement*. `azd` writes "Update
+available: 1.31.1 -> 1.33.0" to stderr on every invocation, and on Windows
+PowerShell 5.1 redirecting a native command's stderr — `2>$null` very much
+included — wraps that stderr in an `ErrorRecord`. Under
+`$ErrorActionPreference = 'Stop'`, an `ErrorRecord` is terminating. So
+`2>$null` did not suppress azd's chatter; it *promoted* it from console
+noise to a fatal error, and the run's success depended on whether the azd
+team had shipped a release recently.
+
+Two things make this worth writing down rather than just fixing.
+
+**The guard was the bug.** Every one of the three `2>$null` in this script
+was added *for* robustness — the calls behind them ask "is this variable
+set?", where a non-zero exit and a complaint on stderr are the expected
+answer, not a failure. Leaving stderr alone would have worked fine. The
+defensive redirection is the only reason the script could crash there at
+all.
+
+**The fix I'd already written was aimed at the wrong shell.** The script
+sets `$PSNativeCommandUseErrorActionPreference = $false` at the top,
+precisely to stop native exit codes becoming terminating errors — but that
+variable only exists in PowerShell 7, and this ran on 5.1, where the
+mechanism isn't exit codes at all, it's stderr redirection. A mitigation
+for the right class of problem in the wrong shell is indistinguishable from
+no mitigation, and nothing in the code said which shell it assumed.
+
+Both native-capture sites now go through one helper that relaxes
+`$ErrorActionPreference` for the duration of the call, so stderr stays
+suppressed *and* suppressing it is not fatal, with `$LASTEXITCODE` still
+checked by hand afterwards:
+
+```powershell
+function Invoke-NativeCapture {
+    param([Parameter(Mandatory)][scriptblock]$Command)
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try   { $output = & $Command 2>$null }
+    finally { $ErrorActionPreference = $previous }
+    return @($output | Where-Object { "$_".Trim() -ne '' })
+}
+```
+
+`azd provision` itself is deliberately *not* routed through it — its output
+is meant to stream to the console, and capturing it would trade a live
+deployment log for a silent wait.
+
+No Azure state was harmed: the crash happened after both azd variables were
+written and before `azd provision` was reached, so the environment was left
+correctly configured and re-running picked up where it stopped.
+
 ## What Deployment Stacks add over Day 23's plain deployments
 
 A plain `az deployment sub create` — or `azd provision` without
@@ -584,7 +652,7 @@ else's environment. Sharing infrastructure invalidates every assumption of
 the form "this stack is alone in here," and naming is the one that hides
 best.
 
-The wider version, which all eight findings point at: a plan is only
+The wider version, which all nine findings point at: a plan is only
 evidence about the things it actually checks. `what-if` validated the
 template, the parameter types and the RBAC, then reported
 `NestedDeploymentShortCircuited` on the two modules it couldn't reach — and
