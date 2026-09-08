@@ -204,6 +204,52 @@ Drop the switch on any subscription with room and the template creates its own
 environment and workspace exactly as Day 23 did — that path is unchanged and
 still the default.
 
+Two things must be set before this will start, both learned the hard way
+(Days/day-24, Findings 16 and 17):
+
+```powershell
+# 1. A JWT signing key. No default - QuotesApi refuses to start in Production
+#    without it, and this template sets Production in every environment.
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$bytes = New-Object byte[] 48; $rng.GetBytes($bytes)
+azd env set JWT_SIGNING_KEY ([Convert]::ToBase64String($bytes))
+
+# 2. The managed identity's database user - the one step that is not Bicep.
+#    Needs a temporary firewall rule for the operator's IP; the template
+#    deliberately has none, because the app does not need one.
+$myIp = (Invoke-RestMethod https://api.ipify.org)
+az sql server firewall-rule create -g rg-quotes-dev -s <sql server> `
+  -n temp-operator --start-ip-address $myIp --end-ip-address $myIp
+sqlcmd -S <sql server>.database.windows.net -d quotesdb -G `
+  -v identityName="quotes-id-dev" -i scripts/create-sql-user.sql
+```
+
+Then push the real image and point the app at it:
+
+```powershell
+az acr login --name <registry>
+dotnet publish ../QuotesApi/QuotesApi.csproj -c Release /t:PublishContainer `
+  -p:ContainerRegistry=<registry>.azurecr.io
+azd env set API_CONTAINER_IMAGE "<registry>.azurecr.io/quotes-api:0.1.0"
+azd env set ACR_LOGIN_SERVER    "<registry>.azurecr.io"
+azd env set ACR_RESOURCE_ID     (az acr show -n <registry> --query id -o tsv)
+```
+
+`ACR_RESOURCE_ID` is what grants this stack's identity AcrPull on a registry
+it does not own. Verified working: the container app pulled
+`quotes-api:0.1.0` in 192ms from a registry in another resource group.
+
+Confirm the app actually started - `provisioned` and `running` are different
+claims, and azd only reports the first:
+
+```powershell
+az containerapp show -n quotes-api-dev -g rg-quotes-dev `
+  --query "{latest:properties.latestRevisionName, ready:properties.latestReadyRevisionName}"
+# those two must MATCH. If they differ, the revision never passed its probes
+# and the previous revision is still serving traffic.
+curl.exe https://<fqdn>/health   # expect: Healthy
+```
+
 Verify the result against Azure rather than against azd's exit message. With
 `alpha.deployment.stacks` off — which the prod plan below requires — all of
 this still deploys and still prints `SUCCESS`, as a plain deployment, with

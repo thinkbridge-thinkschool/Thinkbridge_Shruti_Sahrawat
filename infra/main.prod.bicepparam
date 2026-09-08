@@ -157,8 +157,38 @@ param apiCpu = '1.0'
 param apiMemory = '2Gi'
 param apiConcurrentRequests = 100
 
+// Left as Migrate, deliberately, even though dev has had to retreat to
+// EnsureCreated (see main.dev.bicepparam). Prod must not use EnsureCreated:
+// it writes no __EFMigrationsHistory, so the first production database
+// created that way can never be migrated afterwards without being dropped -
+// which is a one-way door to put in front of real data.
+//
+// The practical consequence is that prod is not deployable today, and that is
+// the honest state rather than a hidden one: the repo has only SQLite
+// migrations (Days/day-24, Finding 17), so Migrate throws
+// PendingModelChangesWarning against Azure SQL. Prod stays blocked on the
+// application fix - a provider-specific SQL Server migration set - instead of
+// being made to look deployable by choosing a bootstrap mode no production
+// database should use.
 param apiSchemaBootstrap = 'Migrate'
 param apiAspNetCoreEnvironment = 'Production'
+
+// Required, no default. This template forces ASPNETCORE_ENVIRONMENT=Production
+// on the container regardless of environment (see main.bicep), and QuotesApi
+// refuses to start in Production without a signing key of at least 32 UTF-8
+// bytes - so an unset value here means the container app deploys, reports
+// Succeeded, and then crash-loops on its very first line of Main(), never
+// reaching SQL or Service Bus at all. That is exactly what happened on dev
+// before this parameter existed (Days/day-24), and prod runs the identical
+// Production-mode container, so the same failure was only ever one deploy away. No default is deliberate, the
+// same reasoning as apiContainerImage in prod: fail at `bicep build-params`,
+// not three minutes into a container restart loop in Azure.
+//
+// Generate one and set it once - never in this file, never committed:
+//   $bytes = [byte[]]::new(48)
+//   [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+//   azd env set JWT_SIGNING_KEY ([Convert]::ToBase64String($bytes))
+param apiJwtSigningKey = readEnvironmentVariable('JWT_SIGNING_KEY')
 
 // 90 days, so an incident review in month three still has the logs it needs.
 param logAnalyticsRetentionInDays = 90

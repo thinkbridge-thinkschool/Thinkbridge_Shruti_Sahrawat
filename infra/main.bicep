@@ -177,6 +177,17 @@ param apiSchemaBootstrap string
 @description('ASPNETCORE_ENVIRONMENT for the container.')
 param apiAspNetCoreEnvironment string = 'Production'
 
+@description('''
+HMAC-SHA256 JWT signing key. Required in every environment this template
+deploys, because apiAspNetCoreEnvironment defaults to Production and
+QuotesApi refuses to start in Production without it - discovered by running
+this template for real, not by reading the app's code first. See
+modules/api.bicep for the full reasoning and Days/day-24 for the crash-loop
+that found it.
+''')
+@secure()
+param apiJwtSigningKey string
+
 @description('Log Analytics retention. The workspace is part of the API module because a container apps environment cannot exist without one. Ignored when existingManagedEnvironmentId is set, because no workspace is created then either.')
 @minValue(30)
 @maxValue(730)
@@ -311,6 +322,7 @@ module api 'modules/api.bicep' = {
     serviceBusFqdn: serviceBus.outputs.fullyQualifiedNamespace
     schemaBootstrap: apiSchemaBootstrap
     aspNetCoreEnvironment: apiAspNetCoreEnvironment
+    jwtSigningKey: apiJwtSigningKey
   }
   dependsOn: [
     registryAccess

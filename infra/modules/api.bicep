@@ -7,11 +7,21 @@
 // outlives the app in any scenario this stack has. A module per resource would
 // be filing, not structure.
 //
-// No secrets. The SQL connection string below carries no password because it
-// authenticates as a managed identity, and the `User Id` in it is the
-// identity's *client* ID - the value that tells the driver which identity to
-// ask for a token when more than one is attached to the app. It is not a
-// credential and does not need @secure().
+// One secret, and it is not the SQL connection string. That string carries no
+// password because it authenticates as a managed identity, and the `User Id`
+// in it is the identity's *client* ID - the value that tells the driver which
+// identity to ask for a token when more than one is attached to the app. It
+// is not a credential and does not need @secure().
+//
+// The JWT signing key is a real secret, discovered the hard way: Program.cs
+// refuses to start in Production without `Jwt__Key` set, and this module set
+// ASPNETCORE_ENVIRONMENT=Production unconditionally for both dev and prod
+// (see aspNetCoreEnvironment below) without ever supplying the one thing that
+// guard requires - so every deploy of this template, dev included, crash-
+// looped on that exception before ever reaching SQL. It is a Container Apps
+// *secret*, referenced by env via secretRef rather than passed as a plain
+// value - the same shape the live app already uses (`jwt-key`), found by
+// checking rather than guessing at the fix.
 // =============================================================================
 
 @description('Container app name.')
@@ -103,6 +113,24 @@ param schemaBootstrap string
 
 param aspNetCoreEnvironment string
 
+@description('''
+HMAC-SHA256 signing key for issued JWTs. Required - Program.cs throws on
+startup in Production if this is empty or under 32 UTF-8 bytes, and this
+module always sets ASPNETCORE_ENVIRONMENT=Production (dev included), so there
+is no environment where this can be skipped.
+
+No default, deliberately, on the same reasoning apiContainerImage uses in
+prod: a deployment that silently ran with no signing key would be a server
+issuing tokens under a key nobody recorded, or - had a placeholder default
+been used instead - a key checked into this file, which is exactly the
+failure mode the app's own startup check exists to prevent. Generate one with
+`[Convert]::ToBase64String((New-Object byte[] 48 | %{ [System.Security.Cryptography.RandomNumberGenerator]::Fill($_); $_ }))`
+and set it once per environment with `azd env set JWT_SIGNING_KEY <value>` -
+never in a committed .bicepparam file.
+''')
+@secure()
+param jwtSigningKey string
+
 @description('Port the container listens on. 8080 is what QuotesApi\'s Dockerfile exposes.')
 param targetPort int = 8080
 
@@ -132,6 +160,13 @@ var baseEnv = [
   {
     name: 'ASPNETCORE_ENVIRONMENT'
     value: aspNetCoreEnvironment
+  }
+  {
+    // secretRef, not value: the actual key never appears in this array, in
+    // `az containerapp show`, or in the ARM deployment's parameter history -
+    // only the reference to the secret defined above does.
+    name: 'Jwt__Key'
+    secretRef: 'jwt-key'
   }
   {
     // Reaches every Azure SDK client in the process (SQL, Service Bus) and tells
@@ -233,6 +268,18 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
         {
           server: containerRegistryLoginServer
           identity: identityResourceId
+        }
+      ]
+      // Container Apps' own secret store, not Key Vault - matching what the
+      // live app already does (`az containerapp secret list` on quotes-api
+      // shows the identical name). A secret here is masked in `show`/`list`
+      // output and in the deployment's parameter history, which a plain env
+      // var would not be; it is a smaller guarantee than Key Vault, and the
+      // right-sized one for a single signing key with no rotation story yet.
+      secrets: [
+        {
+          name: 'jwt-key'
+          value: jwtSigningKey
         }
       ]
     }

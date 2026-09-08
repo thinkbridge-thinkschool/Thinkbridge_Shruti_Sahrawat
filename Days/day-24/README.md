@@ -2,9 +2,9 @@
 
 Deploys the Day 23 stack (`infra/main.bicep`) through `azd` instead of raw
 `az deployment sub` commands, wrapped in an Azure Deployment Stack. Dev was
-run for real against the actual subscription and is still up; prod was
-deployed for real, verified, and then torn down. Fifteen findings came out
-of it.
+run for real against the actual subscription and is still up, running the
+real application image and serving requests; prod was deployed for real,
+verified, and then torn down. Nineteen findings came out of it.
 
 **The end state: the full stack is deployed, as a real Deployment Stack.**
 
@@ -25,6 +25,27 @@ quotes-sql-dev-e6oljhc2krrhe           centralindia  Microsoft.Sql/servers
 quotes-sql-dev-e6oljhc2krrhe/quotesdb  centralindia  Microsoft.Sql/servers/databases
 quotes-api-dev                         southindia    Microsoft.App/containerApps
 ```
+
+And it actually runs. Not "the resources exist" - the real image, serving
+requests, talking to Azure SQL with no password:
+
+```
+$ curl https://quotes-api-dev.blacksand-b575aaa0.southindia.azurecontainerapps.io/health
+Healthy
+
+POST /api/auth/register  -> id 3
+POST /api/quotes         -> { id: 1, author: "Day 24", ownerId: 3,
+                              createdAt: 2026-09-08T16:36:15.1977398Z }
+GET  /api/quotes?page=1  -> totalCount: 1
+
+$ sqlcmd ... -Q "SELECT Id, MessageId, EventType, OccurredAt, SentAt FROM OutboxMessages;"
+1   QuoteCreated-1-20260908T163615197Z   QuoteCreated  2026-09-08 16:36:15.1977398  NULL
+```
+
+Getting there took two more real bugs the placeholder image had been hiding
+for two days - a missing `Jwt__Key` (Finding 16) and a SQLite-only migration
+set that cannot run against Azure SQL (Finding 17). Findings 18 and 19 record
+what the runtime test proved, what it could not, and the drift result.
 
 And prod, promoted after dev and then removed once verified:
 
@@ -1065,6 +1086,268 @@ assignments apply to what it manages and nothing else. That is exactly what
 you want pointed at this stack's SQL server, and exactly what you do not
 want pointed at the live app's environment.
 
+### Finding 16 — the template never set `Jwt__Key`, so the real image had never once started
+
+Every deployment up to this point had used the placeholder
+`mcr.microsoft.com/k8se/quickstart:latest`. Pushing the real image and
+redeploying produced this, on a loop:
+
+```
+Unhandled exception. System.InvalidOperationException: Jwt:Key is not
+configured. Set it as an environment variable (Jwt__Key) on the container app
+before starting in Production.
+   at Program.<Main>$(String[] args) in .../QuotesApi/Program.cs:line 189
+```
+
+```
+$ az containerapp show -n quotes-api-dev -g rg-quotes-dev --query "{latestRevision:properties.latestRevisionName, latestReady:properties.latestReadyRevisionName}"
+{ "latestReady": "quotes-api-dev--m3swprk", "latestRevision": "quotes-api-dev--0000001" }
+```
+
+`modules/api.bicep` builds the container's whole `env` array and never
+included `Jwt__Key`. It also sets `ASPNETCORE_ENVIRONMENT` from
+`apiAspNetCoreEnvironment`, which both parameter files set to `Production` —
+and `Program.cs` deliberately refuses to start in Production without a
+signing key, on the entirely correct reasoning that any default would be a
+key living in the repository. So the template guaranteed a crash for the one
+image it exists to run, in every environment, and dev's `Production` setting
+meant there was no environment where the fallback path applied.
+
+Two things kept this invisible for two days. `what-if`, `bicep build`,
+`bicep lint` and the deployment itself all pass — a missing environment
+variable is not a template error, and nothing in Bicep knows what
+`Program.cs` requires. And azd printed
+`SUCCESS: Your application was provisioned in Azure` three separate times
+over a container that had never served a single request, because provisioning
+the resource and the app being able to run are different claims.
+
+The diagnostic worth keeping is `latestRevision` vs `latestReadyRevisionName`.
+Container Apps only advances `latestReady` once a revision passes its probes,
+so those two values differing is unambiguous proof that a deployment
+"succeeded" while the app never came up. It is a better health signal than
+anything azd or the deployment output offers, and — with
+`activeRevisionsMode: Single` — the old revision keeps serving traffic
+meanwhile, which is Container Apps being sensibly conservative and also the
+reason nothing looked broken from outside.
+
+**The fix was found by checking rather than guessing.** The live app in
+`rg-thinkschool-dev2` already solves this:
+
+```
+$ az containerapp show -n quotes-api -g rg-thinkschool-dev2 --query "properties.template.containers[0].env[?name=='Jwt__Key']"
+[ { "name": "Jwt__Key", "secretRef": "jwt-key" } ]
+$ az containerapp secret list -n quotes-api -g rg-thinkschool-dev2 -o table
+Name
+-------
+jwt-key
+```
+
+So `api.bicep` now does the identical thing: a `@secure()` parameter
+threaded from `main.bicep`, stored in the container app's own `secrets`
+array as `jwt-key`, and referenced by env as `secretRef` rather than
+`value` — so the key appears in neither the env array, nor
+`az containerapp show`, nor the deployment's parameter history. Verified in
+the generated ARM:
+
+```
+{ "name": "Jwt__Key", "secretRef": "jwt-key" }
+```
+
+`readEnvironmentVariable('JWT_SIGNING_KEY')` with **no default**, on the same
+reasoning prod already used for `apiContainerImage`: unset now fails at
+`bicep build-params` with BCP427, rather than three minutes into a container
+restart loop in Azure.
+
+```
+main.bicepparam(173,50) : Error BCP427: Environment variable
+"JWT_SIGNING_KEY" does not exist and there's no default value set.
+```
+
+### Finding 17 — the migrations are SQLite's, and `Migrate` cannot work against Azure SQL
+
+With the key supplied, the next revision got much further — and failed
+somewhere far more interesting:
+
+```
+Unhandled exception. System.InvalidOperationException: An error was generated
+for warning 'Microsoft.EntityFrameworkCore.Migrations.PendingModelChangesWarning':
+The model for context 'QuotesDbContext' has pending changes. Add a new
+migration before updating the database.
+   at Microsoft.EntityFrameworkCore.Migrations.Internal.Migrator.ValidateMigrations(...)
+   at Program.<Main>$(String[] args) in .../QuotesApi/Program.cs:line 308
+```
+
+Note what that stack trace already proves: to reach `ValidateMigrations`, EF
+had to **open a working connection to Azure SQL using the managed identity**.
+The passwordless connection was fine. The problem was the migrations.
+
+Every migration in `QuotesApi/Migrations` was generated against SQLite:
+
+```csharp
+Id        = table.Column<int>(type: "INTEGER")
+Author    = table.Column<string>(type: "TEXT", maxLength: 200)
+CreatedAt = table.Column<DateTime>(type: "TEXT")
+```
+
+`INTEGER` and `TEXT` are SQLite storage classes. SQL Server wants `int`,
+`nvarchar(200)`, `datetime2`. There is no SQL Server migration set in the
+repo at all — `InitialCreate` through `AddOutbox` are all SQLite. So with
+`Database__Provider=SqlServer`, EF builds the model under SQL Server
+conventions, compares it to a snapshot produced under SQLite, finds a
+mismatch, and refuses to apply anything. That is EF behaving correctly.
+
+This falsified a claim `main.dev.bicepparam` had been making since Day 23:
+
+> "Migrate, not EnsureCreated. This database is created by this template, so
+> it starts empty and every migration — including AddOutbox — applies
+> cleanly."
+
+The first half is true; the last three words were not. Day 20 found
+`SchemaBootstrap` *unset* and fixed that. Nobody caught that the value it
+fixed it to selects a migration set that cannot run on the target database —
+because no deployment had ever started the real image, so `Migrate` had never
+actually executed.
+
+**Dev now uses `EnsureCreated`**, which builds the schema from the current
+model rather than the migration set and is therefore provider-correct by
+construction. It works here specifically because `quotesdb` was genuinely
+empty; Day 20's warning that `EnsureCreated` is a no-op against a populated
+database is still true, and is exactly why this is a dev-only answer.
+`__EFMigrationsHistory` is consequently absent, so this database cannot later
+be switched to `Migrate` without being dropped or baselined by hand — stated
+in the parameter file rather than discovered later.
+
+**Prod stays on `Migrate` and is therefore not deployable today**, and that
+is the honest state rather than a hidden one. `EnsureCreated` in production
+would be a one-way door in front of real data. The proper fix is a
+provider-specific migration set — `Migrations/SqlServer` alongside the
+existing SQLite one, selected via `MigrationsAssembly` — which is an
+application change, not an infrastructure one, and is tracked as such instead
+of being smuggled into a deployment exercise.
+
+### Finding 18 — what the runtime test actually proved, and the one thing it could not
+
+```
+$ az containerapp show ... --query "{latestRevision:..., latestReady:...}"
+{ "latestReady": "quotes-api-dev--0000003", "latestRevision": "quotes-api-dev--0000003" }
+
+$ curl https://quotes-api-dev.blacksand-b575aaa0.southindia.azurecontainerapps.io/health
+Healthy
+```
+
+Then a real round trip, against the deployed app:
+
+```
+POST /api/auth/register   -> id 3, rt-20260908-163545@example.com, role user
+POST /api/quotes          -> { id: 1, author: "Day 24", ownerId: 3,
+                               createdAt: 2026-09-08T16:36:15.1977398Z }
+GET  /api/quotes?page=1   -> { items: [ ...that quote... ], totalCount: 1 }
+```
+
+That closes, with evidence rather than assertion:
+
+* **The managed-identity SQL connection, read and write.** No password exists
+  anywhere in the stack; the app authenticates as `quotes-id-dev` via
+  `AZURE_CLIENT_ID`, against the `FROM EXTERNAL PROVIDER` database user
+  created by `scripts/create-sql-user.sql`. And it does this **cross-region** —
+  app in South India, database in Central India, the split `apiLocation`
+  exists for.
+* **`EnsureCreated` built a real, working SQL Server schema.** `id: 1` on the
+  first quote confirms the table was genuinely empty beforehand.
+* **The `Jwt__Key` fix end to end.** `ownerId: 3` matching the registered
+  user's id means the token was signed with the key from the Container Apps
+  secret, returned, validated on the *next* request, and its claim resolved
+  to the right row.
+* **The `AcrPull` cross-resource-group grant.** The system log shows
+  `Successfully pulled image "crjlwf2oyjdsjjg.azurecr.io/quotes-api:0.1.0"
+  in 192ms` — the registry lives in `rg-thinkschool-dev2`, which this stack
+  does not own, and the role assignment `main.bicep` is subscription-scoped
+  in order to make had never actually run before now.
+* **The Day 20 transactional outbox.**
+
+```
+$ sqlcmd ... -Q "SELECT Id, MessageId, EventType, OccurredAt, SentAt FROM OutboxMessages;"
+Id  MessageId                            EventType     OccurredAt                   SentAt
+1   QuoteCreated-1-20260908T163615197Z   QuoteCreated  2026-09-08 16:36:15.1977398  NULL
+```
+
+`OccurredAt` is identical to the quote's `createdAt` to the tick — the quote
+row and the outbox row committed in one transaction, which is the entire
+point of the pattern.
+
+**And the one thing it could not prove.** Both subscriptions are empty:
+
+```
+$ az servicebus topic subscription list ... --topic-name quote-events
+Subscription    Active    Dead
+--------------  --------  ------
+audit-log       0         0
+search-indexer  0         0
+```
+
+`SentAt` being NULL is the explanation, and it is correct behaviour rather
+than a fault: `QuotesApi.csproj` references `Quotes.Messaging` and **not**
+`Quotes.Outbox`. The relay is a separate process by design — Day 20 split the
+write from the publish deliberately — and `main.bicep` deploys exactly one
+workload, the API. Neither `Quotes.Outbox`'s relay nor `Quotes.Worker` is
+deployed by this template at all.
+
+So the honest statement is narrower than "Service Bus proven": the namespace,
+the `quote-events` topic, both subscriptions, their SQL filters and the
+identity's Service Bus role assignments are all provisioned and verified to
+exist, and the API's half of the outbox — the transactional write — is proven.
+No message has ever flowed through that topology, and cannot, because the
+publisher is a deployable this stack does not deploy. That is a gap in the
+template's scope, not a misconfiguration, and it is the next thing to fix.
+
+### Finding 19 — drift persists silently through three re-provisions
+
+`create-sql-user.sql` has to reach the server from an operator's machine, and
+`main.bicep` deliberately provides no rule for that — the app reaches SQL
+through the `0.0.0.0` "allow Azure services" rule, so the only thing that ever
+needs an operator rule is a human running a one-off script. So one was added
+by hand:
+
+```powershell
+az sql server firewall-rule create -g rg-quotes-dev -s quotes-sql-dev-e6oljhc2krrhe `
+  -n temp-operator-access --start-ip-address 223.191.87.101 --end-ip-address 223.191.87.101
+```
+
+That is a resource which exists in Azure, does not exist in `main.bicep`, and
+sits on a SQL server the stack manages — a textbook drift scenario, and a
+free test of something this write-up had only predicted. Three full stack
+re-provisions later:
+
+```
+$ az sql server firewall-rule list -g rg-quotes-dev -s quotes-sql-dev-e6oljhc2krrhe -o table
+Name                     StartIpAddress    EndIpAddress
+-----------------------  ----------------  --------------
+AllowAllWindowsAzureIps  0.0.0.0           0.0.0.0
+temp-operator-access     223.191.87.101    223.191.87.101
+```
+
+It survived. So a Deployment Stack does **not** reconcile away unmanaged child
+resources of a resource it manages, and nothing in any of the three
+deployments' output mentioned its existence. `denySettings: denyDelete` never
+had anything to say about it either, because nothing was deleted — something
+was *added*, and `denyDelete` only blocks deletion.
+
+That confirms this file's own "What would break this" prediction —
+"`denyDelete` doesn't stop a manual edit" — and it qualifies the exercise
+brief's phrase "so drift is detectable" quite sharply. A stack makes drift
+*detectable*, in that `az stack sub show --query resources` gives you an
+authoritative list of what the template owns, which you can diff against what
+is actually in the group. It does not make drift *visible* on its own, does
+not correct it, and does not warn about it. Detecting it is still something
+you have to go and do.
+
+A smaller thing the same exercise surfaced: the operator IP moved from
+`223.191.87.101` to `103.184.236.31` mid-session, and `api.ipify.org`
+reported `.30` while SQL saw `.31` — a CGNAT range rather than a stable
+address. Which is a decent argument for the private-endpoint fix this
+write-up already names as the honest answer: a human's IP is exactly the
+thing that cannot go in a template.
+
 ## What the stack actually manages, and what it deliberately doesn't
 
 The safety argument in Finding 7 — that a borrowed environment must be
@@ -1186,7 +1469,21 @@ Azure, and `SUCCESS` describes what a tool believes about itself. The last
 one is the one I'd have got wrong — I nearly "fixed" a security setting that
 was already correct, and the narrower command is what saved it.
 
-The wider version, which most of the fifteen point at: a plan is only
+The third thing, and the one that took longest to admit: **"provisioned" and
+"works" are different claims, and I had been reporting the first as the
+second.** Every check I had was checking the template against itself. Two
+days of `SUCCESS: Your application was provisioned in Azure` sat on top of a
+container app that had never once started the real image - and when I finally
+ran it, it crash-looped twice on two separate bugs the placeholder had been
+hiding: a `Jwt__Key` the template never set, and a migration set generated
+for SQLite that cannot run against SQL Server. Both were invisible to
+`what-if`, `bicep build`, `bicep lint` and the deployment itself, because
+none of them know what the application requires at startup. The signal that
+would have caught it in ten seconds is
+`latestRevisionName` vs `latestReadyRevisionName` - two fields I did not know
+existed until I needed them.
+
+The wider version, which most of the nineteen point at: a plan is only
 evidence about the things it actually checks. `what-if` validated the
 template, the parameter types and the RBAC, then reported
 `NestedDeploymentShortCircuited` on the two modules it couldn't reach — and
@@ -1229,6 +1526,27 @@ on it. A deployer scoped as Contributor on `rg-quotes-dev` alone gets
 `AuthorizationFailed` on the last resource in the stack. It works here
 because this runs as subscription Owner, which is worth stating rather than
 implying the ID-passing sidesteps authorization as well as reads.
+
+**Drift is not corrected, and this is now measured rather than predicted.**
+A hand-created SQL firewall rule survived three stack re-provisions with no
+warning in any deployment's output (Finding 19). A stack makes drift
+*detectable* - `az stack sub show --query resources` is an authoritative list
+of what the template owns - but detecting it remains something a person has
+to go and do.
+
+**The Service Bus topology has never carried a message.** The namespace,
+topic, both subscriptions, their filters and the identity's role assignments
+are all provisioned and verified; the API's transactional outbox write is
+proven. But `main.bicep` deploys one workload, the API, and the relay that
+publishes outbox rows is a separate process this template does not deploy
+(Finding 18). Nothing will flow through that topology until it does.
+
+**Prod cannot be deployed until the migrations are fixed.** Dev works because
+it retreated to `EnsureCreated` against an empty database; prod stays on
+`Migrate`, which cannot run the repo's SQLite migration set against Azure SQL
+(Finding 17). Making prod deployable by giving it `EnsureCreated` too would
+mean a production database with no `__EFMigrationsHistory` - un-migratable
+without a drop.
 
 **`denyDelete` doesn't stop a manual edit.** It blocks deletion of a
 stack-managed resource outside the stack's own deployment, but a portal edit

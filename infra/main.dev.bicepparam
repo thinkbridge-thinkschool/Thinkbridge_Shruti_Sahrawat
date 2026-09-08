@@ -147,13 +147,62 @@ param apiCpu = '0.5'
 param apiMemory = '1Gi'
 param apiConcurrentRequests = 50
 
-// Migrate, not EnsureCreated. This database is created by this template, so it
-// starts empty and every migration - including AddOutbox - applies cleanly.
-// The existing azd-created database cannot switch to this: it was bootstrapped
-// with EnsureCreated() and has no __EFMigrationsHistory table, so the first
-// migration would try to create tables that are already there. See
-// infra/README.md.
-param apiSchemaBootstrap = 'Migrate'
+// EnsureCreated, not Migrate - and this is a retreat from what this file said
+// before, for a reason the first real runtime test of this stack uncovered.
+//
+// The old comment here read: "Migrate, not EnsureCreated. This database is
+// created by this template, so it starts empty and every migration -
+// including AddOutbox - applies cleanly." The first half is true. The last
+// three words are not, and nothing before Day 24 could have caught it,
+// because no deployment of this template had ever actually started the real
+// image.
+//
+// Every migration in QuotesApi/Migrations was generated against **SQLite**:
+//
+//   Id        = table.Column<int>(type: "INTEGER")
+//   Author    = table.Column<string>(type: "TEXT", maxLength: 200)
+//   CreatedAt = table.Column<DateTime>(type: "TEXT")
+//
+// INTEGER and TEXT are SQLite storage classes; SQL Server wants int,
+// nvarchar(200) and datetime2. There is no SQL Server migration set in the
+// repo at all. So with Database__Provider=SqlServer, EF builds the model
+// under SQL Server conventions, compares it against a snapshot produced under
+// SQLite, finds a mismatch, and throws PendingModelChangesWarning before
+// applying anything - which is EF doing exactly the right thing. The
+// container crash-looped on it (Days/day-24, Finding 17).
+//
+// EnsureCreated builds the schema from the current model instead of from the
+// migration set, so it is provider-correct by construction: it emits real
+// SQL Server DDL, including OutboxMessages. It works here specifically
+// because quotesdb is genuinely empty - Day 20's warning that EnsureCreated
+// is a no-op against a database that already has tables is still true, and is
+// why this is a dev-only answer.
+//
+// What it costs, stated rather than buried: EnsureCreated writes no
+// __EFMigrationsHistory, so this database cannot later be switched to
+// Migrate without being dropped or baselined by hand. The proper fix is a
+// provider-specific migration set (Migrations/SqlServer alongside
+// Migrations/Sqlite, selected by MigrationsAssembly at runtime), after which
+// this parameter goes back to 'Migrate'. That is an application change, not
+// an infrastructure one, and it is tracked as such rather than smuggled into
+// a deployment exercise.
+param apiSchemaBootstrap = 'EnsureCreated'
 param apiAspNetCoreEnvironment = 'Production'
+
+// Required, no default. This template forces ASPNETCORE_ENVIRONMENT=Production
+// on the container regardless of environment (see main.bicep), and QuotesApi
+// refuses to start in Production without a signing key of at least 32 UTF-8
+// bytes - so an unset value here means the container app deploys, reports
+// Succeeded, and then crash-loops on its very first line of Main(), never
+// reaching SQL or Service Bus at all. That happened on this exact environment
+// before this parameter existed (Days/day-24). No default is deliberate, the
+// same reasoning as apiContainerImage in prod: fail at `bicep build-params`,
+// not three minutes into a container restart loop in Azure.
+//
+// Generate one and set it once - never in this file, never committed:
+//   $bytes = [byte[]]::new(48)
+//   [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+//   azd env set JWT_SIGNING_KEY ([Convert]::ToBase64String($bytes))
+param apiJwtSigningKey = readEnvironmentVariable('JWT_SIGNING_KEY')
 
 param logAnalyticsRetentionInDays = 30
