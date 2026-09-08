@@ -860,6 +860,80 @@ assignments apply to what it manages and nothing else. That is exactly what
 you want pointed at this stack's SQL server, and exactly what you do not
 want pointed at the live app's environment.
 
+## What the stack actually manages, and what it deliberately doesn't
+
+The safety argument in Finding 7 — that a borrowed environment must be
+passed as an ID and never declared `existing`, because `denySettings` and
+`actionOnUnmanage` apply to what a stack *manages* — was reasoning until
+this. The stack's own inventory settles it:
+
+```
+$ az stack sub show --name azd-stack-dev --query "{denyMode:denySettings.mode, onUnmanage:actionOnUnmanage, resourceCount:length(resources)}" -o json
+{
+  "denyMode": "denyDelete",
+  "onUnmanage": {
+    "managementGroups": "detach",
+    "resourceGroups": "delete",
+    "resources": "delete",
+    "resourcesWithoutDeleteSupport": "fail"
+  },
+  "resourceCount": 13
+}
+```
+
+```
+$ az stack sub show --name azd-stack-dev --query "resources[].id" -o tsv
+.../resourceGroups/rg-quotes-dev
+.../rg-quotes-dev/providers/Microsoft.App/containerApps/quotes-api-dev
+.../rg-quotes-dev/providers/Microsoft.ManagedIdentity/userAssignedIdentities/quotes-id-dev
+.../rg-quotes-dev/providers/Microsoft.ServiceBus/namespaces/quotes-sb-dev-e6oljhc2krrhe
+.../namespaces/quotes-sb-dev-e6oljhc2krrhe/providers/Microsoft.Authorization/roleAssignments/30112872-...
+.../namespaces/quotes-sb-dev-e6oljhc2krrhe/providers/Microsoft.Authorization/roleAssignments/6933fce2-...
+.../namespaces/quotes-sb-dev-e6oljhc2krrhe/topics/quote-events
+.../topics/quote-events/subscriptions/audit-log
+.../topics/quote-events/subscriptions/search-indexer
+.../topics/quote-events/subscriptions/search-indexer/rules/$Default
+.../rg-quotes-dev/providers/Microsoft.Sql/servers/quotes-sql-dev-e6oljhc2krrhe
+.../servers/quotes-sql-dev-e6oljhc2krrhe/databases/quotesdb
+.../servers/quotes-sql-dev-e6oljhc2krrhe/firewallRules/AllowAllWindowsAzureIps
+```
+
+**The borrowed environment is not in the list, and neither is anything in
+`rg-thinkschool-dev2`.** Every one of the 13 sits inside `rg-quotes-dev`.
+With `resources: delete` *and* `resourceGroups: delete` set, everything
+listed is something `azd down` will destroy — so the list is exactly the
+blast radius, and the live app's managed environment is outside it. That is
+the property the whole design of Finding 7 rests on, now checkable rather
+than argued.
+
+Three more things fall out of the same output.
+
+**`firewallRules/AllowAllWindowsAzureIps` is in there, deployed and
+managed** — the precise resource azd twice announced would fail to deploy
+(Finding 11). Not merely "the deployment succeeded anyway": the allegedly
+impossible resource is a tracked member of the stack.
+
+**`search-indexer/rules/$Default` is managed and `audit-log` has no rule
+entry at all.** That asymmetry is Day 23's `servicebus.bicep` comment
+demonstrating itself — an explicit `sqlFilter` creates a rule resource that
+replaces the default `TrueFilter`, while an empty `sqlFilter` leaves the
+implicit `$Default` in place and never declares it, so the stack has nothing
+to manage there. The template said this in a comment; the stack's inventory
+is independent evidence that the comment was accurate and not just
+plausible.
+
+**`master` is absent.** It shows up in `az resource list -g rg-quotes-dev`
+but is not stack-managed, because Azure creates it alongside any SQL server
+and `main.bicep` never mentions it. The distinction a stack draws is not
+"what is in this resource group" but "what did this template create" — which
+is precisely why the borrowed environment stays out, and why `azd down`
+against a plain deployment (Finding 2) had no way to know either.
+
+`resourcesWithoutDeleteSupport: "fail"` is worth naming too. If the stack
+ever manages something Azure cannot delete through the stack API, teardown
+halts rather than quietly leaving it behind — the exact opposite of Finding
+2's `azd down`, which reported success having deleted nothing at all.
+
 ## GitHub link
 
 https://github.com/thinkbridge-thinkschool/Thinkbridge_Shruti_Sahrawat/tree/main/Days/day-24
@@ -916,9 +990,10 @@ usually the interesting one.
 
 ## What would break this?
 
-**A borrowed environment is someone else's to delete.** Finding 7's whole
-design keeps this stack from having any claim on the live app's managed
-environment — which necessarily means nothing stops the reverse. If that
+**A borrowed environment is someone else's to delete.** Finding 7's design
+keeps this stack from having any claim on the live app's managed environment
+— verified: it is not among the stack's 13 managed resources. Which
+necessarily means nothing stops the reverse. If that
 environment is deleted, or its region retired, or the live app torn down
 along with it, this stack's container app goes with it and the Deployment
 Stack has no record that it depended on anything: the environment was never
