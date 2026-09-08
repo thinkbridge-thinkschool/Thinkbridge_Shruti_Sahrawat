@@ -2,7 +2,9 @@
 
 Deploys the Day 23 stack (`infra/main.bicep`) through `azd` instead of raw
 `az deployment sub` commands, wrapped in an Azure Deployment Stack. Dev was
-run for real against the actual subscription; prod is planned. Thirteen findings came out of it.
+run for real against the actual subscription and is still up; prod was
+deployed for real, verified, and then torn down. Fifteen findings came out
+of it.
 
 **The end state: the full stack is deployed, as a real Deployment Stack.**
 
@@ -24,8 +26,32 @@ quotes-sql-dev-e6oljhc2krrhe/quotesdb  centralindia  Microsoft.Sql/servers/datab
 quotes-api-dev                         southindia    Microsoft.App/containerApps
 ```
 
-Four things in that output are the whole exercise, and none of them were
-true a day earlier:
+And prod, promoted after dev and then removed once verified:
+
+```
+$ az stack sub list -o table
+Name            State      Last Modified
+--------------  ---------  --------------------------------
+azd-stack-prod  succeeded  2026-09-08T13:58:01.619309+00:00
+azd-stack-dev   succeeded  2026-09-08T13:34:47.990063+00:00
+
+$ azd down --force --purge          # prod selected
+  (✓) Done: Deleted subscription deployment stack azd-stack-prod
+SUCCESS: Your application was removed from Azure in 8 minutes 30 seconds.
+
+$ az stack sub list -o table
+azd-stack-dev   succeeded  2026-09-08T13:34:47.990063+00:00
+$ az group exists -n rg-quotes-prod
+false
+$ az containerapp list -g rg-thinkschool-dev2 --query "[].name" -o tsv
+quotes-api
+```
+
+Dev's stack untouched, prod's resource group gone, and the live app still
+there — Findings 14 and 15 have the detail.
+
+Four things in the dev output above are the whole exercise, and none of them
+were true a day earlier:
 
 * **`quotes-api-dev` exists.** The deployment used to die before reaching it
   (Finding 4). It now runs in the managed environment that already existed,
@@ -159,15 +185,35 @@ script and will run, but it hits the same "preview not supported" error
 Finding 3 documents; it isn't a working dry run today, and the script
 doesn't pretend otherwise.
 
-```powershell
-azd env new prod --location <a region Microsoft.App supports - see Finding 4>
-azd env set SQL_AAD_ADMIN_LOGIN     <a group, not a person>
-azd env set SQL_AAD_ADMIN_OBJECT_ID <that group's object ID>
-azd env set API_CONTAINER_IMAGE     <any real image reference>
+Prod, deployed the same way (Finding 14). The admin is a group, not a
+person, which is the one setup step dev doesn't need:
 
-azd config set alpha.deployment.stacks off   # --preview needs this off - Finding 3
+```powershell
+az ad group create --display-name "quotes-sql-admins" --mail-nickname "quotes-sql-admins"
+az ad group member add --group "quotes-sql-admins" --member-id (az ad signed-in-user show --query id -o tsv)
+
+azd env select prod
+azd env set SQL_AAD_ADMIN_LOGIN     "quotes-sql-admins"
+azd env set SQL_AAD_ADMIN_OBJECT_ID (az ad group show --group "quotes-sql-admins" --query id -o tsv)
+azd env set API_CONTAINER_IMAGE     <a real image - prod has no placeholder default>
+
+.\scripts\azd-provision.ps1 -Environment prod -ReuseManagedEnvironment
+```
+
+To plan prod instead of deploying it, `--preview` needs the stacks feature
+off (Finding 3), which also means the plan is not stack-aware:
+
+```powershell
+azd config set alpha.deployment.stacks off
 .\scripts\azd-provision.ps1 -Environment prod -Preview
 azd config set alpha.deployment.stacks on    # back on before touching dev again
+```
+
+Teardown acts on the **selected** environment, so confirm it before running:
+
+```powershell
+azd env get-value AZURE_ENV_NAME   # expect the one you mean to destroy
+azd down --force --purge
 ```
 
 **Always through `azd-provision.ps1`, never `azd provision` directly - even
@@ -183,9 +229,11 @@ currently selected.
 Six problems surfaced running this against the actual subscription, each
 below with its transcript. A seventh change fixed the worst of them;
 findings 8 and 9 are the two bugs that fix introduced, one caught by review
-and one by running it. Findings 10 to 13 are four more azd
-behaviours, three of them occasions where azd's report and Azure's actual
-state disagreed — which turned out to be the theme of the whole day. Two of them were regional or quota limits that
+and one by running it. Findings 10 to 13 are four more azd behaviours;
+Finding 14 is the prod promotion and the third `azd down`; Finding 15 is the
+Azure CLI under-reporting a security setting. Four of the fifteen are cases
+where a tool's output and Azure's actual state disagreed — which turned out
+to be the theme of the whole day. Two of them were regional or quota limits that
 no static check can see; three were azd behaviours that are wrong in ways
 that look right; one was a stale file that planned the wrong environment
 and reported success.
@@ -801,6 +849,163 @@ wrapper is written to be correct on both, which is why Finding 9's helper
 relaxes `$ErrorActionPreference` rather than relying on the PowerShell 7-only
 `$PSNativeCommandUseErrorActionPreference`.
 
+### Finding 14 — prod, promoted for real, and `azd down` proven a third way
+
+Prod had been a plan for good reasons — `main.prod.bicepparam` argues that
+standing up a Premium Service Bus namespace to prove a parameter file parses
+is an expensive way to learn something `bicep build-params` already tells
+you. That argument is sound about *cost* and wrong about *evidence*: the
+exercise says "deploy to dev, then promote to prod," and a plan is not a
+promotion. Premium Service Bus bills hourly at roughly ₹75/hour, so the
+whole objection came to about the price of a coffee for an hour.
+
+One real obstacle first. `main.prod.bicepparam` sets
+`sqlAadAdminPrincipalType = 'Group'` deliberately — "a production server
+whose only administrator is one leaver's account is an outage waiting for a
+resignation" — but the prod environment held a *user's* object ID, and Azure
+rejects a mismatch between the ID and the declared type. The operator on
+this tenant is a guest (`#EXT#`), and guests are often blocked from creating
+Entra groups, so `sqlAadAdminPrincipalType` became
+`readEnvironmentVariable('SQL_AAD_ADMIN_PRINCIPAL_TYPE', 'Group')` — default
+unchanged, overridable so the file can be exercised by whoever has to run
+it. As it turned out the group creation was permitted, so the override was
+never used and prod deployed with the `Group` admin it was designed for. The
+parameter stays anyway: a prod file that only the tenant admin can test is a
+prod file that mostly doesn't get tested.
+
+```powershell
+az ad group create --display-name "quotes-sql-admins" --mail-nickname "quotes-sql-admins"
+az ad group member add --group "quotes-sql-admins" --member-id (az ad signed-in-user show --query id -o tsv)
+azd env select prod
+azd env set SQL_AAD_ADMIN_LOGIN     "quotes-sql-admins"
+azd env set SQL_AAD_ADMIN_OBJECT_ID "6ad8a220-776b-48fe-8395-e2581fd9a4a0"
+.\scripts\azd-provision.ps1 -Environment prod -ReuseManagedEnvironment
+```
+
+```
+  (✓) Done: Resource group: rg-quotes-prod (2.747s)
+  (✓) Done: Azure SQL Server: quotes-sql-prod-zcebapajgws7q (1m10.294s)
+  (✓) Done: Service Bus Namespace: quotes-sb-prod-zcebapajgws7q (1m8.17s)
+  (✓) Done: Container App: quotes-api-prod (18.276s)
+SUCCESS: Your application was provisioned in Azure in 4 minutes 29 seconds.
+```
+
+`quotes-sql-prod-zcebapajgws7q` is, character for character, the name
+Finding 6's `what-if` predicted before any prod resource existed. That is
+the deterministic `resourceToken` earning its keep — a random suffix would
+have made every plan unfalsifiable about names.
+
+Verified while it was up:
+
+```
+$ az servicebus namespace show ... --query "{sku:sku.name, capacity:sku.capacity}"
+{ "capacity": 1, "sku": "Premium" }
+
+$ az sql server ad-only-auth get -g rg-quotes-prod -n quotes-sql-prod-zcebapajgws7q
+{ "azureAdOnlyAuthentication": true }
+```
+
+Premium where dev is Standard, and an Entra-ID-only server whose
+administrator is a group — both differences the prod parameter file argues
+for, now deployed rather than asserted.
+
+**Then the teardown, which is the third data point in the `azd down`
+series.** Same command, same subscription, three outcomes:
+
+| run | stack state | result |
+|---|---|---|
+| Finding 2 | none existed | 5 seconds, deleted **nothing**, reported `SUCCESS` |
+| Finding 4 | `failed` | 8m 44s, deleted the group, SQL server and namespace |
+| here | `succeeded` | 8m 30s, deleted the stack and everything it managed |
+
+```
+  (✓) Done: Deleted subscription deployment stack azd-stack-prod
+SUCCESS: Your application was removed from Azure in 8 minutes 30 seconds.
+```
+
+What survived is the more important half, and it is the only real test of
+Finding 7's safety argument. Prod's stack carried
+`actionOnUnmanage.resourceGroups: delete` *and* `resources: delete`, and it
+deleted for real — so had the borrowed managed environment ever been inside
+prod's managed set, the live site would have gone down with it:
+
+```
+$ az stack sub list -o table
+azd-stack-dev   succeeded    <- untouched
+$ az group exists -n rg-quotes-prod
+false
+$ az resource list -g rg-quotes-dev -o table
+(all six dev resources, Succeeded)
+$ az containerapp list -g rg-thinkschool-dev2 --query "[].name" -o tsv
+quotes-api                   <- live app intact
+```
+
+Two stacks pointed at the same borrowed environment, one torn down and one
+left running, with the environment and the live app untouched. That is the
+ID-not-`existing` decision paying out, and it is also the clearest statement
+of what a Deployment Stack is: not a policy, but a specific, per-template
+record of what belongs to whom — which is exactly what the plain deployment
+in Finding 2 had none of, and why the same command there deleted nothing and
+called it success.
+
+### Finding 15 — `az sql server show` reports Entra-only auth as `null` when it is `true`
+
+Checking prod's admin configuration before teardown produced something
+alarming:
+
+```
+$ az sql server show -n quotes-sql-prod-zcebapajgws7q -g rg-quotes-prod --query "{adOnlyAuth:administrators.azureADOnlyAuthentication, principalType:administrators.principalType, adminGroup:administrators.login, sqlAdminLogin:administratorLogin}" -o json
+{
+  "adOnlyAuth": null,
+  "adminGroup": "quotes-sql-admins",
+  "principalType": "Group",
+  "sqlAdminLogin": "CloudSA6eaa4c7c"
+}
+```
+
+Read plainly: Entra-only authentication did not apply, and there is a SQL
+administrator login on the server that nothing in `main.bicep` asked for.
+`main.bicep`'s own header claims "there is no password, no
+connection-string key and no `@secure()` parameter anywhere in the stack,"
+and Finding 6's `what-if` showed
+`properties.administrators.azureADOnlyAuthentication: true`. This looked
+like the template's central security claim failing in deployment.
+
+It isn't. The purpose-built command disagrees, on both servers:
+
+```
+$ az sql server ad-only-auth get -g rg-quotes-prod -n quotes-sql-prod-zcebapajgws7q
+{ "azureAdOnlyAuthentication": true }
+$ az sql server ad-only-auth get -g rg-quotes-dev  -n quotes-sql-dev-e6oljhc2krrhe
+{ "azureAdOnlyAuthentication": true }
+```
+
+Entra-only is genuinely enforced, which makes `CloudSA6eaa4c7c` inert — a
+login Azure generates when a server is created with an Entra admin and no
+SQL admin specified, and which cannot be used because the server rejects SQL
+authentication outright.
+
+What makes this the nastiest of the day's reporting problems is the
+direction of the error. `az sql server show` returns `administrators.login`
+and `administrators.principalType` correctly, and
+`azureADOnlyAuthentication` as `null` in the same object — not `false`, not
+absent, but null beside accurate siblings, which reads as "queried and
+empty" rather than "not populated by this endpoint." Paired with a
+`CloudSA` login the template never mentions, the obvious conclusion is that
+the server is less locked down than intended, and the obvious response is to
+set `azureADOnlyAuthentication` explicitly, or start managing that login.
+Both would be changes made to fix a problem that does not exist, on a server
+that was already correct — and the second would mean touching SQL
+authentication on a server specifically designed not to have any.
+
+Findings 5, 10, 12 and this one are four occasions in one session where a
+tool's output and Azure's state disagreed, and this is the only one where
+believing the tool would have made the system *worse* rather than merely
+wasted time. The rule that comes out of it: when a general "show me
+everything" command and a purpose-built one disagree, believe the
+purpose-built one — `ad-only-auth get` does one thing, and does it
+accurately.
+
 ## What Deployment Stacks add over Day 23's plain deployments
 
 **One line, since the exercise asks for one:** a plain deployment has no
@@ -821,7 +1026,7 @@ subscription, deployed twice inside an hour — once with
 | resources created | all six | all six, adopted, not rebuilt |
 | record of what it manages | none | the stack's `resources` list |
 | `denySettings` from `azure.yaml` | silently discarded | applied as deny assignments |
-| `azd down` | 5 seconds, deletes nothing, reports success (Finding 2) | deletes the group, SQL server and namespace (Finding 4) |
+| `azd down` | 5 seconds, deletes nothing, reports success (Finding 2) | 8m 30s, deletes the stack and all it manages (Finding 14) |
 
 The last row is the one that matters, and it is the only row where the
 difference is visible to someone who is not looking for it. Both halves are
@@ -972,13 +1177,16 @@ provider, not against the tool.** Four times in one session azd's output and
 Azure's real state disagreed — a plan that silently used the wrong
 environment's parameters (5), a `SUCCESS` that quietly wasn't a Deployment
 Stack at all (10), a linter twice predicting certain failure that never came
-(11), and an `ERROR: deployment failed` for a deployment that had already
-succeeded while a DNS lookup broke in the polling loop (12). None of those
-are bugs I could have avoided. What I can change is what I treat as
-evidence: `az stack sub list` and `az resource list` describe Azure, and
-`SUCCESS` describes what a tool believes about itself.
+(11), an `ERROR: deployment failed` for a deployment that had already succeeded
+while a DNS lookup broke in the polling loop (12), and `az sql server show`
+reporting Entra-only authentication as `null` when it was actually `true`
+(15). None of those are bugs I could have avoided. What I can change is what
+I treat as evidence: `az stack sub list` and `ad-only-auth get` describe
+Azure, and `SUCCESS` describes what a tool believes about itself. The last
+one is the one I'd have got wrong — I nearly "fixed" a security setting that
+was already correct, and the narrower command is what saved it.
 
-The wider version, which most of the thirteen point at: a plan is only
+The wider version, which most of the fifteen point at: a plan is only
 evidence about the things it actually checks. `what-if` validated the
 template, the parameter types and the RBAC, then reported
 `NestedDeploymentShortCircuited` on the two modules it couldn't reach — and

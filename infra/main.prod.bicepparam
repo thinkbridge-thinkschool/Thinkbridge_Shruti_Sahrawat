@@ -1,11 +1,15 @@
 // =============================================================================
-// prod - never deployed, and labelled as such rather than implied.
+// prod - deployed for real, verified, and then torn down.
 //
-// This file has not been run against a real subscription: the exercise's budget
-// is one environment, and standing up a Premium Service Bus namespace to prove a
-// parameter file parses would be an expensive way to learn something `bicep
-// build-params` already tells you. What it is verified to be is *valid* - it
-// compiles, and its every value is type-checked against main.bicep.
+// This file spent a while labelled "never deployed", on the reasoning that
+// standing up a Premium Service Bus namespace to prove a parameter file parses
+// is an expensive way to learn something `bicep build-params` already tells
+// you. That is true about cost and wrong about evidence: Premium bills hourly,
+// so the whole objection came to about an hour's pocket change, and a plan is
+// not a promotion. It has now been run against the real subscription -
+// Premium namespace, GP_Gen5_2 database, Entra-ID-only server administered by
+// a group - confirmed, and removed with `azd down`. See Days/day-24,
+// Finding 14.
 //
 // Each difference from dev below is a decision with a reason, not a bigger
 // number for its own sake.
@@ -40,7 +44,18 @@ param tags = {
 // administrator is one leaver's account is an outage waiting for a resignation.
 param sqlAadAdminLogin = readEnvironmentVariable('SQL_AAD_ADMIN_LOGIN', '')
 param sqlAadAdminObjectId = readEnvironmentVariable('SQL_AAD_ADMIN_OBJECT_ID', '')
-param sqlAadAdminPrincipalType = 'Group'
+// Group is the answer this file argues for, the default it keeps, and what the
+// real prod deployment actually used - `quotes-sql-admins`, created for the
+// purpose. It is readable from the environment only so the file can be
+// *exercised* by whoever has to run it: this tenant's operator is a guest
+// (#EXT#), and guests are often blocked from creating Entra groups, which
+// would make a hard-coded 'Group' untestable by the one person able to run it.
+// That restriction turned out not to apply here, so the override was never
+// used - it stays because a prod file only the tenant admin can test is a prod
+// file that mostly does not get tested. Overriding it is a documented
+// deviation, and it fails loudly either way: the object ID and the type have
+// to agree or Azure rejects the server outright.
+param sqlAadAdminPrincipalType = readEnvironmentVariable('SQL_AAD_ADMIN_PRINCIPAL_TYPE', 'Group')
 
 // General Purpose Gen5, 2 vCores. The jump off Basic is not about size - it is
 // that Basic caps at 2 GB, keeps 7 days of backups, and has no read scale-out or
