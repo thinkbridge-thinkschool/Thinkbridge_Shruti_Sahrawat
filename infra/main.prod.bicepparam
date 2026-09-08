@@ -88,6 +88,35 @@ param serviceBusSubscriptions = [
 ]
 
 // -----------------------------------------------------------------------------
+// Managed environment
+// -----------------------------------------------------------------------------
+
+// Same mechanism as dev, opposite expectation. Unset - the default, and what
+// this file leaves it as - prod creates its own managed environment, which is
+// what a production subscription should do: an app sharing dev's environment
+// shares its platform upgrades and its outages, and inherits a blast radius
+// nobody sized for production.
+//
+// It is parameterised here at all, rather than hardcoded empty, because the
+// asymmetry would itself be the bug - a template where only one environment can
+// borrow is a template that cannot be exercised the way it will be run. Set it
+// and prod borrows too; nothing here decides that on prod's behalf.
+// Explicit, not the template default of '<namePrefix>-api'. A container app
+// name must be unique within its *managed environment*, not within its resource
+// group - so the moment an environment can be shared, 'quotes-api' collides
+// with the live app of that exact name. Naming the app per environment makes
+// the borrowed and owned paths behave identically instead of one of them being
+// a latent hostname conflict. See main.dev.bicepparam.
+param apiName = 'quotes-api-prod'
+
+param existingManagedEnvironmentId = readEnvironmentVariable('EXISTING_CONTAINERAPP_ENV_ID', '')
+
+// Only ever consulted when the line above is set - main.bicep ignores it
+// otherwise, so a stale value cannot quietly move a prod environment. See
+// main.dev.bicepparam, where it is load-bearing.
+param apiLocation = readEnvironmentVariable('API_LOCATION', '')
+
+// -----------------------------------------------------------------------------
 // API
 // -----------------------------------------------------------------------------
 

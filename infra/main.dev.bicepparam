@@ -84,6 +84,48 @@ param serviceBusSubscriptions = [
 ]
 
 // -----------------------------------------------------------------------------
+// Managed environment
+// -----------------------------------------------------------------------------
+
+// Borrowed, not created. This subscription allows exactly one Container Apps
+// managed environment and the live quotes-api already occupies it, so the first
+// real deployment of this stack failed at
+// MaxNumberOfGlobalEnvironmentsInSubExceeded with three of four resource types
+// already up. Pointing the app at the environment that exists is what makes a
+// complete deployment of this template possible at all here - not a shortcut
+// around a cost.
+//
+// Read from the environment rather than written down, because the ID contains a
+// subscription ID and because `azd-provision.ps1 -ReuseManagedEnvironment`
+// discovers it with `az containerapp env list` and sets it. Unset, this template
+// reverts to Day 23's behaviour and creates its own - correct for any
+// subscription with room, and the behaviour every earlier day's verification
+// was recorded against.
+// Explicit, not the template default of '<namePrefix>-api'.
+//
+// This is the one genuinely dangerous detail in the whole reuse mechanism. A
+// container app's name must be unique within its *managed environment*, not
+// within its resource group, and its default hostname is derived from it -
+// so a second app called 'quotes-api' joining the environment the live
+// quotes-api already runs in either fails outright or contends for
+// quotes-api.<env-domain>, which is the hostname the Static Web App proxies
+// /api/* to. A different resource group does not separate them; only the name
+// does. Deploying into shared infrastructure means the naming has to stop
+// assuming the stack is alone in it.
+param apiName = 'quotes-api-dev'
+
+param existingManagedEnvironmentId = readEnvironmentVariable('EXISTING_CONTAINERAPP_ENV_ID', '')
+
+// A container app must live in its environment's region. The borrowed
+// environment is in southindia; the rest of this stack cannot be, because
+// southindia refuses to provision a new Azure SQL server for this subscription
+// (see `location` above). So these two genuinely differ - for exactly as long
+// as the environment is borrowed. main.bicep ignores this value entirely when
+// existingManagedEnvironmentId is empty, so a leftover setting cannot move a
+// stack-owned environment and its workspace somewhere nobody asked for.
+param apiLocation = readEnvironmentVariable('API_LOCATION', '')
+
+// -----------------------------------------------------------------------------
 // API
 // -----------------------------------------------------------------------------
 

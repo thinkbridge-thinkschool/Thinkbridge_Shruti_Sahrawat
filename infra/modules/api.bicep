@@ -21,8 +21,43 @@ param location string
 
 param tags object = {}
 
-@description('Name of the managed environment to create.')
+@description('Name of the managed environment to create. Ignored when existingManagedEnvironmentId is supplied.')
 param environmentName string
+
+@description('''
+Resource ID of a Container Apps managed environment that already exists, to
+host this app in instead of creating one.
+
+This is not a convenience knob. This subscription is capped at exactly one
+managed environment (`MaxNumberOfGlobalEnvironmentsInSubExceeded`) and the one
+it is allowed already runs the live quotes-api - so creating a second is not
+slow or expensive here, it is impossible, and it is where the first real dev
+deployment of this stack stopped. Supplied, this parameter makes the container
+app join that environment: the app, its ingress, its identity, its revisions
+and its scale rules are all still this stack's, and the environment is the one
+piece of shared infrastructure it borrows rather than owns.
+
+Empty (the default) keeps Day 23's behaviour exactly - create the environment
+and its workspace as part of the stack - so nothing about the template changes
+for a subscription that has room.
+
+Two consequences worth stating rather than discovering:
+  * The Log Analytics workspace is not created either. Log destination is a
+    property of the environment, not the app, so a workspace this stack made
+    would receive nothing; the app's logs go where the borrowed environment
+    already sends them.
+  * A container app must sit in its environment's region. That is what
+    `apiLocation` in main.bicep exists for, and why it can differ from the
+    region the rest of the stack deploys to.
+
+The environment is deliberately NOT declared as an `existing` resource here.
+Reading it would need the caller to hold permissions on a resource group this
+stack does not manage, purely to look up an ID that was passed in already -
+and, more to the point, `denySettings` applies to what the stack manages. A
+borrowed environment must stay unmanaged by this stack, or `azd down` would
+be entitled to take the live app's environment down with it.
+''')
+param existingManagedEnvironmentId string = ''
 
 param logAnalyticsName string
 
@@ -115,7 +150,13 @@ var serviceBusEnv = empty(serviceBusFqdn) ? [] : [
   }
 ]
 
-resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
+// Both of these are created only when this stack owns its environment. They
+// share one condition on purpose: an environment cannot exist without a
+// workspace to point at, so there is no combination where one is wanted and
+// the other is not.
+var createsManagedEnvironment = empty(existingManagedEnvironmentId)
+
+resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = if (createsManagedEnvironment) {
   name: logAnalyticsName
   location: location
   tags: tags
@@ -127,7 +168,7 @@ resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   }
 }
 
-resource managedEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' = {
+resource managedEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' = if (createsManagedEnvironment) {
   name: environmentName
   location: location
   tags: tags
@@ -135,15 +176,28 @@ resource managedEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' = {
     appLogsConfiguration: {
       destination: 'log-analytics'
       logAnalyticsConfiguration: {
-        customerId: logAnalytics.properties.customerId
+        // The `!` is a non-null assertion, and it is the correct answer here
+        // rather than a way to quiet a warning. `logAnalytics` is conditional,
+        // so its type is `workspace | null`, and Bicep cannot see that this
+        // resource carries the *same* condition - meaning on every branch where
+        // this expression is evaluated at all, the workspace exists. Without
+        // the assertion this is BCP318/BCP422; with a `?? ''` fallback instead
+        // it would compile and then deploy an environment wired to no
+        // workspace, which is worse than either.
+        customerId: logAnalytics!.properties.customerId
         // listKeys at deploy time rather than a parameter: the key is never
         // written down, never passed on a command line and never lands in a
         // deployment-history parameter record.
-        sharedKey: logAnalytics.listKeys().primarySharedKey
+        sharedKey: logAnalytics!.listKeys().primarySharedKey
       }
     }
   }
 }
+
+// `managedEnvironment.id` on a conditional resource resolves to a computed
+// resource ID, not a read of the resource, so this is safe on the branch where
+// the resource is never deployed - the ternary picks the other side there.
+var resolvedEnvironmentId = createsManagedEnvironment ? managedEnvironment.id : existingManagedEnvironmentId
 
 resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
   name: name
@@ -156,7 +210,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
     }
   }
   properties: {
-    environmentId: managedEnvironment.id
+    environmentId: resolvedEnvironmentId
     configuration: {
       activeRevisionsMode: 'Single'
       ingress: {
@@ -239,5 +293,10 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
 output resourceId string = containerApp.id
 output fqdn string = containerApp.properties.configuration.ingress.fqdn
 output name string = containerApp.name
-output managedEnvironmentId string = managedEnvironment.id
-output logAnalyticsWorkspaceId string = logAnalytics.id
+output managedEnvironmentId string = resolvedEnvironmentId
+
+@description('Whether this stack created the environment it runs in, or borrowed one. Surfaced as an output because it changes where to go looking for logs, and that is not something to have to re-derive from the parameter file later.')
+output ownsManagedEnvironment bool = createsManagedEnvironment
+
+@description('Empty when the environment was borrowed - the workspace belongs to whoever owns that environment.')
+output logAnalyticsWorkspaceId string = createsManagedEnvironment ? logAnalytics!.id : ''

@@ -65,6 +65,18 @@ var defaultTags = union(tags, {
 var resolvedSqlServerName = empty(sqlServerName) ? '${namePrefix}-sql-${environmentName}-${resourceToken}' : sqlServerName
 var resolvedServiceBusNamespaceName = empty(serviceBusNamespaceName) ? '${namePrefix}-sb-${environmentName}-${resourceToken}' : serviceBusNamespaceName
 
+// The container app's region: the stack's, unless a borrowed environment pins
+// it somewhere else.
+//
+// Deliberately ignored when this stack creates its own environment, even if
+// apiLocation is set. The api module uses one `location` for the app, the
+// managed environment and the workspace, so honouring apiLocation on the
+// owned path would silently move all three - which is not what the parameter
+// says it does, and would make a value left over from a previous borrowed run
+// relocate a whole environment. Borrowing is the only case where the app's
+// region is not the stack's, so it is the only case where this applies.
+var resolvedApiLocation = (empty(apiLocation) || empty(existingManagedEnvironmentId)) ? location : apiLocation
+
 // -----------------------------------------------------------------------------
 // SQL
 // -----------------------------------------------------------------------------
@@ -165,10 +177,39 @@ param apiSchemaBootstrap string
 @description('ASPNETCORE_ENVIRONMENT for the container.')
 param apiAspNetCoreEnvironment string = 'Production'
 
-@description('Log Analytics retention. The workspace is part of the API module because a container apps environment cannot exist without one.')
+@description('Log Analytics retention. The workspace is part of the API module because a container apps environment cannot exist without one. Ignored when existingManagedEnvironmentId is set, because no workspace is created then either.')
 @minValue(30)
 @maxValue(730)
 param logAnalyticsRetentionInDays int
+
+@description('''
+Resource ID of a Container Apps managed environment that already exists, to
+host the API in rather than creating one.
+
+Left empty, this template behaves exactly as Day 23 - the environment and its
+workspace are part of the stack. Set, the container app joins an environment
+this stack does not manage. The reason it exists: this subscription permits one
+managed environment, that one runs the live quotes-api, and a second cannot be
+created at any price - see Days/day-24, Finding 4. Full reasoning in
+modules/api.bicep.
+''')
+param existingManagedEnvironmentId string = ''
+
+@description('''
+Region for the container app, when it differs from the stack's. Read only
+when existingManagedEnvironmentId is set, and ignored otherwise - an app that
+lives in an environment this stack created is always in the stack's region by
+construction.
+
+It exists because a container app must sit in its environment's region, and a
+borrowed environment's region is not this stack's to choose: the existing
+environment is in southindia, and southindia will not provision a new Azure
+SQL server for this subscription (`ProvisioningDisabled`, Finding 2). So the
+stack deploys to centralindia and the app alone sits in southindia beside the
+environment it joins. That is a real cross-region hop from app to database and
+a real latency cost, named here rather than left to be found on a p99 chart.
+''')
+param apiLocation string = ''
 
 // =============================================================================
 // Resource group
@@ -250,9 +291,10 @@ module api 'modules/api.bicep' = {
   name: 'api'
   params: {
     name: apiName
-    location: location
+    location: resolvedApiLocation
     tags: defaultTags
     environmentName: '${namePrefix}-env-${environmentName}'
+    existingManagedEnvironmentId: existingManagedEnvironmentId
     logAnalyticsName: '${namePrefix}-logs-${environmentName}'
     logAnalyticsRetentionInDays: logAnalyticsRetentionInDays
     identityResourceId: identity.outputs.resourceId
@@ -291,3 +333,12 @@ output serviceBusTopic string = serviceBus.outputs.topicName
 output managedIdentityClientId string = identity.outputs.clientId
 output managedIdentityPrincipalId string = identity.outputs.principalId
 output managedIdentityName string = identity.outputs.name
+
+@description('The environment the API actually runs in, whether this stack created it or borrowed an existing one.')
+output apiManagedEnvironmentId string = api.outputs.managedEnvironmentId
+
+@description('False when the environment was borrowed - which also means `azd down` will not take it with it, and that is the intended behaviour, not a gap.')
+output apiOwnsManagedEnvironment bool = api.outputs.ownsManagedEnvironment
+
+@description('Region the container app landed in. Equal to the stack location unless a borrowed environment pinned it elsewhere - which is the only case where these two differ, and worth reading back rather than inferring.')
+output apiDeployedLocation string = resolvedApiLocation

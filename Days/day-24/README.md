@@ -1,14 +1,23 @@
 # Day 24 — Deployment Stacks + azd
 
-Deploys the Day 23 stack (`infra/main.bicep`, unchanged) through `azd`
-instead of raw `az deployment sub` commands, wrapped in an Azure Deployment
-Stack. Dev was run for real against the actual subscription and got as far
-as a genuine, subscription-wide capacity ceiling — identity, Service Bus and
-SQL all deployed and were tracked as a real stack before that ceiling hit;
-see "How far dev actually got" below for why that's a complete result, not
-a stopped-short one. Prod is planned, never deployed — same reasoning
-`main.prod.bicepparam` already gives for itself, now applied to the whole
-exercise.
+Deploys the Day 23 stack (`infra/main.bicep`) through `azd` instead of raw
+`az deployment sub` commands, wrapped in an Azure Deployment Stack. Dev was
+run for real against the actual subscription; prod is planned. Eight
+findings came out of it — six from running it, and two from re-reading the
+fix for the sixth against the live system it was about to deploy next to.
+
+The last of them changed the template. Dev's first real run reached a
+genuine, subscription-wide ceiling — this subscription permits exactly one
+Container Apps managed environment and the live `quotes-api` already holds
+it — after identity, Service Bus and SQL had all deployed and been tracked
+as a real stack. The first version of this write-up argued that was a
+complete result. It isn't quite: the exercise says *deploy the full stack*,
+and "the subscription is full" is a reason the stack can't be created a
+second time, not a reason the app can't be deployed. Finding 7 is the
+change that closes it — the container app can now join the environment that
+already exists instead of demanding its own, which is both the only way this
+stack deploys end to end here and, separately, how a real environment gets
+shared between apps anyway.
 
 ## What's new
 
@@ -18,10 +27,16 @@ exercise.
 | [`infra/scripts/azd-provision.ps1`](../../infra/scripts/azd-provision.ps1) | The entry point. Selects the right `.bicepparam`, then calls `azd`. See "Why not just a hook" below — this exists because the more obvious design (a preprovision hook alone) doesn't work. |
 | [`infra/scripts/select-bicepparam.ps1`](../../infra/scripts/select-bicepparam.ps1) | Copies `main.dev.bicepparam` or `main.prod.bicepparam` onto `main.bicepparam` — the one filename azd's Bicep provider actually reads. Called directly by `azd-provision.ps1`, and also wired as azd's `preprovision` hook as a re-assertion (see below for why it can't be the only mechanism). |
 | `infra/main.bicepparam` (generated, gitignored) | Never hand-edited. Whichever of the two real files was last selected. |
+| `existingManagedEnvironmentId` + `apiLocation` in [`main.bicep`](../../infra/main.bicep) / [`modules/api.bicep`](../../infra/modules/api.bicep) | Lets the container app join a managed environment the stack does not own. Empty (the default) is Day 23's exact behaviour. Finding 7. |
+| `-ReuseManagedEnvironment` in [`azd-provision.ps1`](../../infra/scripts/azd-provision.ps1) | Discovers that environment with `az containerapp env list` and sets both values, rather than having anyone paste a subscription-scoped resource ID. |
 
-`main.bicep`, `types.bicep` and every module are byte-for-byte unchanged
-from Day 23. One line changed in `main.dev.bicepparam` — `location` — for a
-real reason found while running this (see Finding 2).
+`types.bicep`, `identity.bicep`, `sql.bicep`, `servicebus.bicep` and
+`registry-access.bicep` are byte-for-byte unchanged from Day 23. Three
+files changed, each for a failure this run actually hit: `location` in
+`main.dev.bicepparam` and `main.prod.bicepparam` (Finding 2), and the
+optional managed-environment reuse in `main.bicep` and `modules/api.bicep`
+(Finding 7). Every default is Day 23's default, so a subscription with room
+gets Day 23's deployment unchanged.
 
 ## Why a second azure.yaml instead of one shared project
 
@@ -67,11 +82,24 @@ From inside `infra/` (never the repo root):
 
 ```powershell
 cd infra
-azd env new dev --location southindia
+azd env new dev --location centralindia
 azd env set SQL_AAD_ADMIN_LOGIN     (az ad signed-in-user show --query userPrincipalName -o tsv)
 azd env set SQL_AAD_ADMIN_OBJECT_ID (az ad signed-in-user show --query id -o tsv)
 
-.\scripts\azd-provision.ps1 -Environment dev
+.\scripts\azd-provision.ps1 -Environment dev -ReuseManagedEnvironment
+```
+
+`centralindia`, not `southindia` — Finding 2. `-ReuseManagedEnvironment` —
+Finding 7; without it this deployment fails partway through on this
+subscription, every time, for a reason nothing in the template can fix.
+Drop the switch anywhere with quota to spare and the stack creates its own
+environment as before.
+
+Teardown is the same command either way, and it does not take the borrowed
+environment with it — the stack never managed it:
+
+```powershell
+azd down --force --purge
 ```
 
 There is no `-Preview` that actually plans a deployment stack — see Finding
@@ -99,27 +127,35 @@ late to matter. The wrapper selects the file first every time; a bare
 `azd provision --preview` does not, regardless of which environment is
 currently selected.
 
-## How far dev actually got, and why that's a complete result
+## How far dev got, and what it took to get the rest of the way
 
-Four real problems surfaced running this against the actual subscription,
-each below with its transcript. The short version: the managed identity,
-Service Bus namespace and SQL server all deployed successfully and were
-tracked as a genuine Azure Deployment Stack. The deployment then hit
-`MaxNumberOfGlobalEnvironmentsInSubExceeded` — this subscription allows
-exactly one Container Apps managed environment, and it already has one, the
-one the live `quotes-api` app runs in. No region change fixes that; it's a
-subscription-wide ceiling, not a regional one. Getting past it needs either
-a support-ticket quota increase or decommissioning the live environment,
-and this exercise does neither.
+Six problems surfaced running this against the actual subscription, each
+below with its transcript. A seventh change fixed the worst of them, and an
+eighth finding is the bug that fix introduced. Two of them were regional or quota limits that
+no static check can see; three were azd behaviours that are wrong in ways
+that look right; one was a stale file that planned the wrong environment
+and reported success.
 
-That's a real, deliberate stopping point rather than a failure to complete
-the exercise. Everything Day 24 is actually testing — azd driving a
-subscription-scoped Bicep template, the parameter-file-per-environment
-mechanism, a Deployment Stack forming, and `azd down` correctly tearing one
-down once it exists — is proven by three resources deploying and being
-cleanly removed as a stack. What's left untested is standing up a fourth
-resource type this subscription has no room for regardless of anything in
-this exercise.
+The one that mattered most: the managed identity, Service Bus namespace and
+SQL server all deployed successfully and were tracked as a genuine Azure
+Deployment Stack, then the deployment hit
+`MaxNumberOfGlobalEnvironmentsInSubExceeded`. This subscription allows
+exactly one Container Apps managed environment and already has one — the one
+the live `quotes-api` runs in. No region change fixes that; it's a
+subscription-wide ceiling, not a regional one, and the two obvious ways past
+it are a support-ticket quota increase or decommissioning the live app's
+environment. This exercise does neither, and for a while that read as the
+end of the road.
+
+It wasn't, because the ceiling is on *creating an environment*, not on
+running an app. A managed environment is shared infrastructure by design —
+it exists precisely so several container apps can sit in it — so the
+template asking for a private one was a choice, not a requirement. Finding
+7 makes that choice a parameter. With it, the whole stack deploys: group,
+identity, SQL server and database, Service Bus namespace with both
+subscriptions and their filters, and the container app itself, all in one
+Deployment Stack, with the environment as the single borrowed piece the
+stack deliberately does not manage.
 
 ### Finding 1 — a preprovision hook fires too late to supply parameters
 
@@ -334,6 +370,162 @@ already-diagnosed SQL regional restriction into prod the first time anyone
 ran it. Now reads `readEnvironmentVariable('AZURE_LOCATION', 'southindia')`,
 same pattern as dev, same default if unset.
 
+### Finding 7 — the quota is on creating an environment, not on running an app
+
+Findings 2 and 4 both end the same way: a real deployment discovers a limit
+that every pre-deployment check passed straight through. Finding 2's was
+regional and moved with a parameter. Finding 4's looked absolute:
+
+```
+"code": "MaxNumberOfGlobalEnvironmentsInSubExceeded",
+"message": "The subscription '109b67f4-...' cannot have more than 1
+Container App Environments."
+```
+
+Read carefully, that error is narrower than it first appears. It caps
+*environments*, and says nothing about apps. A Container Apps managed
+environment is a shared boundary by design — a VNet, a Log Analytics
+destination and a Dapr/KEDA control plane that any number of container apps
+can sit inside. `main.bicep` creating one per stack wasn't a requirement of
+the workload; it was the default that made a self-contained template tidy,
+and on a subscription with one environment slot it's the single line that
+makes the template undeployable.
+
+So the environment became optional:
+
+```bicep
+// modules/api.bicep
+var createsManagedEnvironment = empty(existingManagedEnvironmentId)
+
+resource logAnalytics '...workspaces@2023-09-01' = if (createsManagedEnvironment) { ... }
+resource managedEnvironment '...managedEnvironments@2024-03-01' = if (createsManagedEnvironment) { ... }
+
+var resolvedEnvironmentId = createsManagedEnvironment
+  ? managedEnvironment.id
+  : existingManagedEnvironmentId
+```
+
+Four things about that are decisions rather than mechanics:
+
+**The workspace is conditional on the same flag, not on its own.** Log
+destination is a property of the *environment*, not the app. A workspace
+created alongside a borrowed environment would receive nothing at all — an
+empty resource that looks like working observability, which is worse than
+not having one.
+
+**The borrowed environment is not declared `existing`.** Reading it would
+need permissions on a resource group this stack doesn't manage, to look up
+an ID that was already passed in. The real reason is narrower though:
+`denySettings` and `actionOnUnmanage: delete` apply to what the stack
+manages. An `existing` reference is still just a read, but the habit it
+encourages isn't — and a stack with any claim on the live app's environment
+is a strictly worse outcome than the quota was. `azd down` on this stack
+now deletes a resource group, a SQL server, a Service Bus namespace and a
+container app, and leaves the environment exactly where it found it.
+
+**`managedEnvironment.id` on a conditional resource is safe; `.properties`
+would not be.** It compiles to `resourceId(...)` — string arithmetic on the
+name, no read of Azure state — so it's valid even on the branch where the
+resource is never deployed, and the ternary discards it there anyway.
+Confirmed in the generated ARM rather than assumed:
+
+```
+resolvedEnvironmentId = [if(variables('createsManagedEnvironment'),
+                            resourceId('Microsoft.App/managedEnvironments', parameters('environmentName')),
+                            parameters('existingManagedEnvironmentId'))]
+```
+
+The `logAnalytics!.properties.customerId` inside the environment block is
+the opposite case and needs the `!` non-null assertion: a conditional
+resource has type `workspace | null`, Bicep can't see that its only
+consumer carries the identical condition, and `bicep build` says so
+(BCP318/BCP422). The assertion is the correct fix here specifically because
+the condition is shared. A `?? ''` fallback would also compile — and would
+deploy an environment wired to no workspace.
+
+**A container app must sit in its environment's region, and here that
+region can't be the stack's.** The existing environment is in `southindia`;
+`southindia` won't provision a new Azure SQL server for this subscription
+(Finding 2). So `apiLocation` splits the app's region from the stack's: app
+in `southindia` beside the environment it borrows, everything else in
+`centralindia`. That's a real cross-region hop from app to database and a
+real latency cost — named here, and in `main.bicep`'s own description of
+the parameter, rather than left to be found on a p99 chart later.
+
+`-ReuseManagedEnvironment` on the wrapper discovers the ID and the region
+with `az containerapp env list` instead of having anyone paste a
+subscription-scoped resource ID, and refuses rather than guessing if it ever
+finds more than one. The `else` branch clears both azd variables, which is
+Finding 5's lesson applied prospectively: a value left over from a previous
+run is exactly as dangerous as a stale parameters file, and for the same
+reason — it makes no noise.
+
+Verified statically before running: `bicep build main.bicep`, `bicep lint`
+and `bicep build-params` all clean with zero warnings on both parameter
+files, and the generated ARM inspected on both branches to confirm the two
+conditions match, `environmentId` resolves to the borrowed ID, and the
+`logAnalyticsWorkspaceId` output degrades to `''` rather than to a
+dangling reference.
+
+### Finding 8 — the reuse fix nearly took the live app's hostname
+
+Finding 7 was written, compiled clean, linted clean, and reviewed as
+correct before this surfaced. `main.bicep` names the container app from a
+default:
+
+```bicep
+param apiName string = '${namePrefix}-api'   // -> 'quotes-api'
+```
+
+The live app in the environment being borrowed is called `quotes-api`.
+
+A container app's name has to be unique within its **managed environment**,
+not within its resource group, and its default hostname is derived from that
+name. So Finding 7's change would have deployed a second `quotes-api` into
+the environment the real one already occupies — best case a hard failure
+after SQL and Service Bus were up (Finding 4's shape all over again), worst
+case contention for `quotes-api.<env-domain>`, which is the hostname the
+Day 17 Static Web App proxies `/api/*` to. Deploying into a different
+resource group does not separate them. Only the name does.
+
+`main.dev.bicepparam` and `main.prod.bicepparam` now set `apiName`
+explicitly — `quotes-api-dev` and `quotes-api-prod` — rather than
+overriding it only on the borrowed path, because a name that changes
+depending on how the stack was invoked is a name that recreates the app the
+first time someone invokes it differently.
+
+The reason to write this one up rather than just fix it: every check that
+passed was checking the template against itself. `bicep build` verifies
+types, `lint` verifies style, `what-if` verifies the plan against the
+subscription's *current* state — and none of them know that a name which is
+unique in `rg-quotes-dev` stops being unique the moment the app joins
+somebody else's environment. The bug was created by the fix, in the gap the
+fix opened, and it was found by re-reading the change against the live
+system's actual resource names. That's the real lesson from Finding 7:
+borrowing shared infrastructure means every assumption of the form "this
+stack is alone in here" has to be re-checked, and naming is the one that
+hides best.
+
+Two smaller defects came out of the same re-read, both now fixed:
+
+**`apiLocation` moved more than it claimed to.** `modules/api.bicep` uses
+one `location` for the app, the environment and the workspace, so on the
+path where the stack creates its own environment, a leftover `API_LOCATION`
+would have relocated all three. It is now ignored unless
+`existingManagedEnvironmentId` is set — the only case where the app's region
+is legitimately not the stack's.
+
+**The reuse switch could have pointed the stack at an environment inside
+its own resource group.** `denySettings` and `actionOnUnmanage.resources`
+genuinely cannot touch an unmanaged resource, which is Finding 7's whole
+safety argument — but `actionOnUnmanage.resourceGroups: delete` is not
+resource-scoped, and deleting a group takes unmanaged contents with it. The
+one arrangement where `azd down` would destroy the environment it borrowed
+is the one where that environment sits in the stack's own group, and being
+unmanaged is exactly why nothing would stop it. The script now refuses that
+case instead of relying on the live environment happening to live in
+`rg-thinkschool-dev2`.
+
 ## What Deployment Stacks add over Day 23's plain deployments
 
 A plain `az deployment sub create` — or `azd provision` without
@@ -350,17 +542,90 @@ Azure RBAC deny assignment on every resource the stack manages (with the
 caveat in "What would break this," below: it doesn't stop a write, only a
 delete).
 
+"Every resource the stack manages" is also the precise reason Finding 7's
+borrowed environment is passed in as an ID rather than declared `existing`.
+A Deployment Stack's whole value is that it has an opinion about the
+resources in its scope — `actionOnUnmanage: delete` and a deny assignment on
+each one. That is exactly what you want pointed at this stack's SQL server
+and exactly what you do not want pointed at the live app's environment. Once
+teardown is a single command that genuinely deletes things, what the stack
+does *not* manage stops being a technicality.
+
 ## GitHub link
 
 https://github.com/thinkbridge-thinkschool/Thinkbridge_Shruti_Sahrawat/tree/main/Days/day-24
 
-Commit `7cb1839`.
+The template and wrapper this write-up describes:
+[`infra/main.bicep`](../../infra/main.bicep),
+[`infra/modules/api.bicep`](../../infra/modules/api.bicep),
+[`infra/azure.yaml`](../../infra/azure.yaml),
+[`infra/scripts/azd-provision.ps1`](../../infra/scripts/azd-provision.ps1),
+[`infra/README.md`](../../infra/README.md).
 
 ## What did you learn this session?
 
-<!-- one line, in your own words -->
+That "the subscription won't let me" is a claim worth re-reading before
+accepting. `MaxNumberOfGlobalEnvironmentsInSubExceeded` stopped this
+deployment three resources in, and I wrote most of a page arguing that was
+a complete result — the quota is real, it's subscription-wide, and neither
+of the two ways past it was mine to take. What I'd missed is that the limit
+caps *environments*, not apps, and my template only needed its own
+environment because creating one was the tidier default. Making that a
+parameter took about twenty lines and turned a blocked deployment into a
+finished one.
+
+Then the fix introduced a worse bug than the one it solved — a second
+`quotes-api` aimed at the live app's own hostname (Finding 8) — and
+everything that passed cleanly passed because it was checking the template
+against itself. `bicep build` checks types, `lint` checks style, `what-if`
+checks the plan against current state; none of them know that a name unique
+in one resource group stops being unique the moment the app joins someone
+else's environment. Sharing infrastructure invalidates every assumption of
+the form "this stack is alone in here," and naming is the one that hides
+best.
+
+The wider version, which all eight findings point at: a plan is only
+evidence about the things it actually checks. `what-if` validated the
+template, the parameter types and the RBAC, then reported
+`NestedDeploymentShortCircuited` on the two modules it couldn't reach — and
+both real failures landed in exactly those two. Day 23 read that diagnostic
+as "resolves itself once identity is real," which is true about the
+unresolved reference and says nothing about a region with no capacity or a
+subscription with no room. A skipped check is not a passed one, and it's
+usually the interesting one.
 
 ## What would break this?
+
+**A borrowed environment is someone else's to delete.** Finding 7's whole
+design keeps this stack from having any claim on the live app's managed
+environment — which necessarily means nothing stops the reverse. If that
+environment is deleted, or its region retired, or the live app torn down
+along with it, this stack's container app goes with it and the Deployment
+Stack has no record that it depended on anything: the environment was never
+one of its managed resources, so `denyDelete` doesn't cover it and a
+re-provision won't recreate it. The honest read is that the quota was
+traded for a dependency, not removed. On a subscription with room, dropping
+`-ReuseManagedEnvironment` is strictly better and is still the default.
+
+**`-ReuseManagedEnvironment` is a one-way door, and the script can only warn
+about it.** A container app's `location` and `environmentId` are both
+immutable. Deploy dev once with the switch and once without, and the second
+run asks Azure to move the same app to a different region *and* a different
+environment; ARM answers "already exists in location 'southindia'" rather
+than migrating it. Recreating is the only route, and `denySettings:
+denyDelete` blocks the delete half of that — so the actual recovery is
+`azd down --force --purge` first. The script now warns when it sees a prior
+borrowed run instead of walking into it, but a warning is all it can do:
+nothing in the template can make an immutable property mutable.
+
+**Joining someone else's environment needs permission on it.** Passing an
+ID rather than declaring the environment `existing` avoids needing *read*
+access to that resource group, but creating a container app in an
+environment still requires `Microsoft.App/managedEnvironments/join/action`
+on it. A deployer scoped as Contributor on `rg-quotes-dev` alone gets
+`AuthorizationFailed` on the last resource in the stack. It works here
+because this runs as subscription Owner, which is worth stating rather than
+implying the ID-passing sidesteps authorization as well as reads.
 
 **`denyDelete` doesn't stop a manual edit.** It blocks deletion of a
 stack-managed resource outside the stack's own deployment, but a portal edit

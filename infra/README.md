@@ -154,11 +154,55 @@ inside `infra/`. Always `cd infra` first.
 ```powershell
 azd config set alpha.deployment.stacks on   # one-time per machine
 cd infra
-azd env new dev --location southindia
+azd env new dev --location centralindia
 azd env set SQL_AAD_ADMIN_LOGIN     (az ad signed-in-user show --query userPrincipalName -o tsv)
 azd env set SQL_AAD_ADMIN_OBJECT_ID (az ad signed-in-user show --query id -o tsv)
-.\scripts\azd-provision.ps1 -Environment dev
+
+.\scripts\azd-provision.ps1 -Environment dev -ReuseManagedEnvironment
 ```
+
+`centralindia`, not `southindia`: South India will not provision a *new*
+Azure SQL server for this subscription at all (`ProvisioningDisabled`), which
+Day 23's `what-if` had no way to catch because what-if never asks a region
+whether it has room.
+
+`-ReuseManagedEnvironment` is what makes the deployment reach the end. This
+subscription permits exactly one Container Apps managed environment and the
+live `quotes-api` already holds it, so a stack that creates its own fails at
+`MaxNumberOfGlobalEnvironmentsInSubExceeded` *after* SQL and Service Bus are
+already standing. The switch discovers the environment that exists
+(`az containerapp env list`) and hands azd two values the parameter files
+read: `EXISTING_CONTAINERAPP_ENV_ID`, and `API_LOCATION` — because a container
+app must sit in its environment's region, so the app lands in `southindia`
+beside the environment it borrows while the rest of the stack stays in
+`centralindia`. That cross-region app-to-database hop is a genuine latency
+cost, chosen over not deploying at all.
+
+The app is named `quotes-api-dev` / `quotes-api-prod` in the parameter
+files, not the template's `quotes-api` default, and that is not cosmetic: a
+container app name must be unique within its *managed environment*, and the
+live app in the environment being borrowed is called exactly `quotes-api`.
+A different resource group does not separate them — the hostname would
+collide with the one the Static Web App proxies `/api/*` to. See
+[`Days/day-24/README.md`](../Days/day-24/README.md), Finding 8.
+
+The wrapper also refuses to reuse an environment that lives inside this
+stack's own resource group: `actionOnUnmanage.resourceGroups: delete` is not
+resource-scoped, so `azd down` would take it down with the group despite the
+stack never managing it — and being unmanaged is exactly why `denyDelete`
+would not stop that.
+
+What the stack still owns, borrowed environment or not: the resource group,
+the managed identity, the SQL server and database, the Service Bus namespace
+and its topology, and the container app itself. The environment is the single
+piece it borrows, and it is deliberately **not** declared as an `existing`
+resource — `denySettings` and `azd down` apply to what a stack manages, and a
+stack entitled to delete the live app's environment is a worse outcome than
+the quota.
+
+Drop the switch on any subscription with room and the template creates its own
+environment and workspace exactly as Day 23 did — that path is unchanged and
+still the default.
 
 `azd-provision.ps1`, not `azd provision` directly - the parameters file
 (`main.bicepparam`) has to exist before azd resolves parameters, one step
