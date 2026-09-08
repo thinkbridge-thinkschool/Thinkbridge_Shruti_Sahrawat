@@ -1,0 +1,65 @@
+# =============================================================================
+# Day 24 - a second, separate azd project, scoped to this folder only.
+#
+# The repo already has an azure.yaml at its root, and that one drives the real,
+# live app in rg-thinkschool-dev2 - the site actually serving
+# https://white-bush-08e3cd710.7.azurestaticapps.net. This file does not touch
+# it and is not read by it: azd finds the nearest azure.yaml by walking up from
+# the current directory, so a command run from *inside* infra/ (or with
+# `-C infra`) resolves to this file, and a command run from the repo root still
+# resolves to the root one, untouched either way.
+#
+# What this project provisions is the Day 23 stack (SQL, Service Bus, the API
+# container app - all subscription-scoped) - the same infra/main.bicep, run
+# through azd instead of raw `az deployment sub` commands, so it deploys as an
+# Azure Deployment Stack rather than a plain deployment. See
+# Days/day-24/README.md for what that buys over Day 23's what-if-only exercise,
+# and infra/README.md for the exact commands.
+# =============================================================================
+
+name: quotes-infra-stack
+metadata:
+  template: quotes-infra-stack@0.1.0
+
+infra:
+  provider: bicep
+  path: .
+  module: main
+  # Alpha in azd today - enable once per machine with:
+  #   azd config set alpha.deployment.stacks on
+  # https://learn.microsoft.com/azure/developer/azure-developer-cli/azure-deployment-stacks-integration
+  deploymentStacks:
+    actionOnUnmanage:
+      resources: delete
+      resourceGroups: delete
+    denySettings:
+      mode: denyDelete
+      excludedActions:
+        # Deleting the group itself is `azd down`'s job, not a portal accident
+        # this setting exists to catch.
+        - Microsoft.Resources/subscriptions/resourceGroups/delete
+
+# No services block - this project provisions infra only. The container image
+# is still built and pushed as its own step (infra/README.md, "Deploy"), the
+# same separation Day 23 already documented and Day 17's frontend deploy
+# already relies on for the same reason: a change to the template has nothing
+# to say about whether the image build succeeded, and the reverse.
+
+# The preprovision hook here is a re-assertion, NOT the mechanism that puts
+# main.bicepparam on disk. azd resolves infrastructure parameters *before* it
+# runs preprovision, so a hook that writes the parameters file writes it one
+# step too late: azd finds no file, and falls back to prompting interactively
+# for every parameter it cannot resolve from a convention-named environment
+# variable - including sqlDatabaseSku and serviceBusSubscriptions, which are an
+# object and an array of objects and cannot be answered at a text prompt at
+# all. Verified on azd 1.31.1.
+#
+# scripts/azd-provision.ps1 is therefore the entry point: it selects the
+# parameters file first, then calls azd. This hook stays because it costs
+# nothing and re-asserts that the file on disk matches the environment actually
+# being deployed - which is worth having if someone calls `azd provision`
+# directly, even though by then it can only correct the *next* run.
+hooks:
+  preprovision:
+    shell: pwsh
+    run: ./scripts/select-bicepparam.ps1

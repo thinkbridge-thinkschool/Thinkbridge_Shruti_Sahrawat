@@ -11,7 +11,16 @@
 using 'main.bicep'
 
 param environmentName = 'dev'
-param location = 'southindia'
+// Read from the environment, defaulting to the Day 23 value. azd owns
+// AZURE_LOCATION for the selected environment, so `azd env set AZURE_LOCATION
+// <region>` moves the whole stack without editing this file - which turned out
+// to matter: South India refused to provision a *new* Azure SQL server for this
+// subscription ("ProvisioningDisabled: Subscriptions are restricted from
+// provisioning in this region"), a per-subscription regional capacity
+// restriction that Day 23's what-if could not have caught, because what-if
+// validates the template and RBAC but never asks the region whether it has
+// room. Unset, this still resolves to southindia exactly as Day 23 documented.
+param location = readEnvironmentVariable('AZURE_LOCATION', 'southindia')
 param resourceGroupName = 'rg-quotes-dev'
 param namePrefix = 'quotes'
 

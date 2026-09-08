@@ -18,6 +18,9 @@ somebody runs one of the commands below.
 | [`main.prod.bicepparam`](main.prod.bicepparam) | prod values. Valid and type-checked; never deployed — see the header in that file. |
 | [`bicepconfig.json`](bicepconfig.json) | Linter settings. Most rules raised from warning to error. |
 | [`scripts/create-sql-user.sql`](scripts/create-sql-user.sql) | The one step Bicep cannot express: the managed identity's database user. |
+| [`azure.yaml`](azure.yaml) | Day 24 - a separate azd project scoped to this folder, wrapping this same template in an Azure Deployment Stack. |
+| [`scripts/azd-provision.ps1`](scripts/azd-provision.ps1) | Day 24 - the entry point. Selects the environment's `.bicepparam` before azd resolves parameters, then calls `azd provision` - a `preprovision` hook alone runs one step too late (see `Days/day-24/README.md`). |
+| [`scripts/select-bicepparam.ps1`](scripts/select-bicepparam.ps1) | Day 24 - copies the active environment's `.bicepparam` onto `main.bicepparam`. Called by `azd-provision.ps1`; also wired as azd's `preprovision` hook, as a re-assertion rather than the mechanism. |
 
 ## Before you run anything
 
@@ -137,3 +140,34 @@ TrueFilter — means the indexer is receiving every event.
   just this one. The real fix is VNet integration for the container app plus a
   private endpoint on the server, and it is a larger change than this exercise
   covers — named here rather than left as a comfortable default.
+
+## Running this through azd instead (Day 24)
+
+Everything above still works exactly as written - nothing in `main.bicep`
+or either `.bicepparam` file changed for this. What's new is a second way to
+run the same template: through `azd`, wrapped in an Azure Deployment Stack,
+from a **second azure.yaml that lives inside this folder**
+(`infra/azure.yaml`), not the one at the repo root - which drives the real,
+live app in `rg-thinkschool-dev2` and is never read when `azd` runs from
+inside `infra/`. Always `cd infra` first.
+
+```powershell
+azd config set alpha.deployment.stacks on   # one-time per machine
+cd infra
+azd env new dev --location southindia
+azd env set SQL_AAD_ADMIN_LOGIN     (az ad signed-in-user show --query userPrincipalName -o tsv)
+azd env set SQL_AAD_ADMIN_OBJECT_ID (az ad signed-in-user show --query id -o tsv)
+.\scripts\azd-provision.ps1 -Environment dev
+```
+
+`azd-provision.ps1`, not `azd provision` directly - the parameters file
+(`main.bicepparam`) has to exist before azd resolves parameters, one step
+earlier than a `preprovision` hook runs, and there is currently no
+`--preview` for a deployment stack in azd (both found by actually running
+this - see [`Days/day-24/README.md`](../Days/day-24/README.md) for the full
+transcripts). That same file also has the real outcome: identity, Service
+Bus and SQL all deployed and were tracked as a genuine stack before hitting
+a subscription-wide Container Apps quota this exercise deliberately doesn't
+work around, plus the sharpest finding of the two days combined - `azd down`
+reporting success while deleting nothing, when no stack yet existed to
+enumerate.
