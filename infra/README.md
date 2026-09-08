@@ -162,12 +162,16 @@ azd env set SQL_AAD_ADMIN_OBJECT_ID (az ad signed-in-user show --query id -o tsv
 
 `azd-provision.ps1`, not `azd provision` directly - the parameters file
 (`main.bicepparam`) has to exist before azd resolves parameters, one step
-earlier than a `preprovision` hook runs, and there is currently no
-`--preview` for a deployment stack in azd (both found by actually running
-this - see [`Days/day-24/README.md`](../Days/day-24/README.md) for the full
-transcripts). That same file also has the real outcome: identity, Service
-Bus and SQL all deployed and were tracked as a genuine stack before hitting
-a subscription-wide Container Apps quota this exercise deliberately doesn't
-work around, plus the sharpest finding of the two days combined - `azd down`
-reporting success while deleting nothing, when no stack yet existed to
-enumerate.
+earlier than a `preprovision` hook runs. Skipping the wrapper doesn't just
+risk an interactive prompt (missing file) - it risks silently planning a
+*stale* file with no warning at all if one happens to already be on disk
+(found by actually hitting it - see
+[`Days/day-24/README.md`](../Days/day-24/README.md), Finding 5). That file
+has the full run for both environments: dev's identity, Service Bus and SQL
+deployed and were tracked as a genuine stack before hitting a
+subscription-wide Container Apps quota this exercise deliberately doesn't
+work around; prod's real plan (5 resources, the same
+`NestedDeploymentShortCircuited` diagnostics Day 23 found); and the
+sharpest single finding across both days - `azd down` reporting success
+while deleting nothing, when no stack yet existed to enumerate, versus
+genuinely tearing down three resources once one did.

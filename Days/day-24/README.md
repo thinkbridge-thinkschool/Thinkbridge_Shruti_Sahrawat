@@ -87,10 +87,17 @@ azd env set SQL_AAD_ADMIN_OBJECT_ID <that group's object ID>
 azd env set API_CONTAINER_IMAGE     <any real image reference>
 
 azd config set alpha.deployment.stacks off   # --preview needs this off - Finding 3
-azd env select prod
-azd provision --preview
+.\scripts\azd-provision.ps1 -Environment prod -Preview
 azd config set alpha.deployment.stacks on    # back on before touching dev again
 ```
+
+**Always through `azd-provision.ps1`, never `azd provision` directly - even
+for a plan.** Finding 5 is what happens otherwise: a stale `main.bicepparam`
+left over from a previous environment gets used with no warning at all,
+because the `preprovision` hook that would refresh it runs one step too
+late to matter. The wrapper selects the file first every time; a bare
+`azd provision --preview` does not, regardless of which environment is
+currently selected.
 
 ## How far dev actually got, and why that's a complete result
 
@@ -242,6 +249,91 @@ doing its job at all. It also draws the line honestly: that guarantee exists
 only *after* a deployment succeeds far enough to register one. On the
 failure path in Finding 2, there was nothing for it to protect yet.
 
+### Finding 5 — running the plan outside the wrapper silently planned the wrong environment
+
+The first prod attempt used `azd provision --preview` directly instead of
+`azd-provision.ps1`, on the reasoning that stacks was already off so the
+wrapper's broken `-Preview` path (Finding 3) didn't matter. It mattered for
+a different reason: `main.bicepparam` still held *dev's* content, left over
+from Finding 4's run, and a bare `azd provision --preview` only refreshes it
+via the `preprovision` hook - which, per Finding 1, runs after azd has
+already resolved parameters. There was no file missing this time, so there
+was nothing to prompt for either. It just silently planned dev's resources
+under the `prod` label:
+
+```
+Location: Central India
+  Resources:
+  Create : Resource group   : rg-quotes-dev
+  Create : Azure SQL Server : quotes-sql-dev-e6oljhc2krrhe
+SUCCESS: Generated provisioning preview in 30 seconds.
+```
+
+That's a worse failure mode than Finding 1, not a repeat of it. A missing
+parameters file makes noise - an interactive prompt impossible to miss. A
+*stale* one makes none: azd reports success, the resource names are
+plausible at a glance, and the only tell is reading the resource group name
+against which environment you meant to be looking at. Re-running through
+the wrapper (`azd-provision.ps1 -Environment prod -Preview`) selects the
+correct file first and produced the real plan below.
+
+### Finding 6 — the real prod plan, and the same short-circuit Day 23 documented
+
+```powershell
+$env:SQL_AAD_ADMIN_LOGIN     = (az ad signed-in-user show --query userPrincipalName -o tsv)
+$env:SQL_AAD_ADMIN_OBJECT_ID = (az ad signed-in-user show --query id -o tsv)
+$env:API_CONTAINER_IMAGE     = "mcr.microsoft.com/k8se/quickstart:latest"
+az deployment sub what-if --name quotes-prod-plan --location centralindia --template-file main.bicep --parameters main.bicepparam
+```
+
+(Raw `az deployment sub what-if` rather than `azd provision --preview` here,
+for the detail azd's own summary doesn't show - and because a raw `az`
+command doesn't see azd's `.env` at all, which is why the three
+`$env:` lines above are needed first; azd injects those itself when it's
+the one calling `az`.)
+
+```
+Scope: /subscriptions/109b67f4-3ed5-413c-bcb0-62c54340b387
+  + resourceGroups/rg-quotes-prod [2024-03-01]
+      location: "southindia"
+      tags.environment: "prod"
+      tags.dataClassification: "internal"
+
+  + Microsoft.ManagedIdentity/userAssignedIdentities/quotes-id-prod
+  + Microsoft.Sql/servers/quotes-sql-prod-zcebapajgws7q
+      properties.administrators.azureADOnlyAuthentication: true
+      properties.administrators.principalType: "Group"
+      properties.administrators.login: "*******"
+      properties.minimalTlsVersion: "1.2"
+  + Microsoft.Sql/servers/.../databases/quotesdb
+      sku.name: "GP_Gen5_2", properties.maxSizeBytes: 34359738368
+  + Microsoft.Sql/servers/.../firewallRules/AllowAllWindowsAzureIps
+      properties.startIpAddress / endIpAddress: "0.0.0.0"
+
+Resource changes: 5 to create.
+
+Diagnostics (2):
+  (NestedDeploymentShortCircuited) ... reported against the `servicebus`
+  and `api` module deployments.
+```
+
+Structurally identical to Day 23's dev what-if: 5 resources, the same two
+`NestedDeploymentShortCircuited` diagnostics on `servicebus` and `api`, for
+the same reason - both need `identity.outputs.principalId`, which doesn't
+exist as a concrete value until identity has actually deployed. Confirms
+the Entra-ID-only SQL admin (`principalType: "Group"`, no
+`administratorLogin`/password anywhere), the General Purpose database at
+the prod size, and the identical `0.0.0.0` firewall rule dev has.
+
+One thing this run caught and fixed: the output above shows
+`location: "southindia"` even though the deployment operation itself ran
+against `centralindia` - `main.prod.bicepparam`'s `location` was still the
+Day 23 hardcoded literal, unlike `main.dev.bicepparam`'s (Finding 2 fix).
+Left alone, a real prod deployment would have carried Finding 2's exact,
+already-diagnosed SQL regional restriction into prod the first time anyone
+ran it. Now reads `readEnvironmentVariable('AZURE_LOCATION', 'southindia')`,
+same pattern as dev, same default if unset.
+
 ## What Deployment Stacks add over Day 23's plain deployments
 
 A plain `az deployment sub create` — or `azd provision` without
@@ -260,7 +352,9 @@ delete).
 
 ## GitHub link
 
-<!-- fill in after pushing: repo tree link to Days/day-24, or a commit hash -->
+https://github.com/thinkbridge-thinkschool/Thinkbridge_Shruti_Sahrawat/tree/main/Days/day-24
+
+Commit `7cb1839`.
 
 ## What did you learn this session?
 

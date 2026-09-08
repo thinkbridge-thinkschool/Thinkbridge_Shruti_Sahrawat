@@ -14,7 +14,14 @@
 using 'main.bicep'
 
 param environmentName = 'prod'
-param location = 'southindia'
+// Read from the environment, defaulting to the Day 23 value - the same
+// pattern main.dev.bicepparam uses, and for a reason now confirmed rather
+// than hypothetical: a real dev deploy against southindia failed with
+// "ProvisioningDisabled: Subscriptions are restricted from provisioning in
+// this region" on Azure SQL (Days/day-24). Left as the hardcoded literal,
+// this file would carry the identical, already-diagnosed failure into prod
+// the first time anyone tried to deploy it for real.
+param location = readEnvironmentVariable('AZURE_LOCATION', 'southindia')
 param resourceGroupName = 'rg-quotes-prod'
 param namePrefix = 'quotes'
 
