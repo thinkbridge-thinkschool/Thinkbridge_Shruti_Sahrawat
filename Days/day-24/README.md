@@ -2,10 +2,48 @@
 
 Deploys the Day 23 stack (`infra/main.bicep`) through `azd` instead of raw
 `az deployment sub` commands, wrapped in an Azure Deployment Stack. Dev was
-run for real against the actual subscription; prod is planned. Nine
-findings came out of it: six from running it, two from re-reading the fix
-for the sixth against the live system it was about to deploy beside, and one
-from that fix's first real run.
+run for real against the actual subscription; prod is planned. Thirteen findings came out of it.
+
+**The end state: the full stack is deployed, as a real Deployment Stack.**
+
+```
+$ az stack sub list -o table
+Name           State      Last Modified
+-------------  ---------  --------------------------------
+azd-stack-dev  succeeded  2026-09-08T13:34:47.990063+00:00
+```
+
+```
+$ az resource list -g rg-quotes-dev -o table
+Name                                   Location      Type
+-------------------------------------  ------------  ------------------------------------------------
+quotes-id-dev                          centralindia  Microsoft.ManagedIdentity/userAssignedIdentities
+quotes-sb-dev-e6oljhc2krrhe            centralindia  Microsoft.ServiceBus/namespaces
+quotes-sql-dev-e6oljhc2krrhe           centralindia  Microsoft.Sql/servers
+quotes-sql-dev-e6oljhc2krrhe/quotesdb  centralindia  Microsoft.Sql/servers/databases
+quotes-api-dev                         southindia    Microsoft.App/containerApps
+```
+
+Four things in that output are the whole exercise, and none of them were
+true a day earlier:
+
+* **`quotes-api-dev` exists.** The deployment used to die before reaching it
+  (Finding 4). It now runs in the managed environment that already existed,
+  in a *different resource group*, proving cross-resource-group environment
+  joining works (Finding 7).
+* **It is in `southindia` while everything else is in `centralindia`** — the
+  region split `apiLocation` exists for, because the borrowed environment's
+  region cannot host a new Azure SQL server on this subscription (Finding 2).
+* **There is no Log Analytics workspace in the group.** Correct, and not an
+  omission: log destination belongs to the environment, so a workspace here
+  would have been an empty resource impersonating observability (Finding 7).
+* **The name is `quotes-api-dev`, not `quotes-api`.** The live app in that
+  same environment *is* `quotes-api`, on
+  `quotes-api.blacksand-b575aaa0.southindia.azurecontainerapps.io`; this one
+  is `quotes-api-dev.blacksand-b575aaa0.southindia.azurecontainerapps.io`.
+  Same environment domain. Identical names would have contended for the
+  identical hostname — the one Day 17's Static Web App proxies `/api/*` to
+  (Finding 8).
 
 The last of them changed the template. Dev's first real run reached a
 genuine, subscription-wide ceiling — this subscription permits exactly one
@@ -96,6 +134,18 @@ subscription, every time, for a reason nothing in the template can fix.
 Drop the switch anywhere with quota to spare and the stack creates its own
 environment as before.
 
+**Check the flag before believing the output.** `azd config get
+alpha.deployment.stacks` must say `"on"`, and the prod plan below turns it
+off. Left off, everything here still deploys and still reports `SUCCESS` —
+as a plain deployment, with `azure.yaml`'s entire `deploymentStacks` block
+silently discarded and no warning of any kind. Finding 10. Confirm with
+`az stack sub list`, not with azd's exit message:
+
+```powershell
+azd config get alpha.deployment.stacks   # expect "on"
+az stack sub list -o table               # expect azd-stack-dev
+```
+
 Teardown is the same command either way, and it does not take the borrowed
 environment with it — the stack never managed it:
 
@@ -132,8 +182,10 @@ currently selected.
 
 Six problems surfaced running this against the actual subscription, each
 below with its transcript. A seventh change fixed the worst of them;
-findings 8 and 9 are the two bugs that fix introduced, one found by review
-and one by running it. Two of them were regional or quota limits that
+findings 8 and 9 are the two bugs that fix introduced, one caught by review
+and one by running it. Findings 10 to 13 are four more azd
+behaviours, three of them occasions where azd's report and Azure's actual
+state disagreed — which turned out to be the theme of the whole day. Two of them were regional or quota limits that
 no static check can see; three were azd behaviours that are wrong in ways
 that look right; one was a stale file that planned the wrong environment
 and reported success.
@@ -153,11 +205,18 @@ It wasn't, because the ceiling is on *creating an environment*, not on
 running an app. A managed environment is shared infrastructure by design —
 it exists precisely so several container apps can sit in it — so the
 template asking for a private one was a choice, not a requirement. Finding
-7 makes that choice a parameter. With it, the whole stack deploys: group,
+7 makes that choice a parameter, and with it the whole stack deploys: group,
 identity, SQL server and database, Service Bus namespace with both
-subscriptions and their filters, and the container app itself, all in one
+subscriptions and their filters, and the container app itself, all under one
 Deployment Stack, with the environment as the single borrowed piece the
-stack deliberately does not manage.
+stack deliberately does not manage. The state at the top of this file is
+that deployment, and `azd-stack-dev` reporting `succeeded` is what closes
+the exercise.
+
+Getting there needed two more corrections that had nothing to do with the
+quota: the app had to be renamed before it collided with the live one
+(Finding 8), and the wrapper had to stop being killed by azd's own update
+banner (Finding 9).
 
 ### Finding 1 — a preprovision hook fires too late to supply parameters
 
@@ -594,7 +653,193 @@ No Azure state was harmed: the crash happened after both azd variables were
 written and before `azd provision` was reached, so the environment was left
 correctly configured and re-running picked up where it stopped.
 
+### Finding 10 — azd read the whole `deploymentStacks` block and silently ignored it
+
+The first successful full deployment was not a Deployment Stack at all, and
+nothing in azd's output said so:
+
+```
+  (✓) Done: Resource group: rg-quotes-dev (2.601s)
+  (✓) Done: Service Bus Namespace: quotes-sb-dev-e6oljhc2krrhe (19.738s)
+  (✓) Done: Azure SQL Server: quotes-sql-dev-e6oljhc2krrhe (1m14.901s)
+SUCCESS: Your application was provisioned in Azure in 3 minutes 18 seconds.
+```
+
+```
+$ az stack sub list -o table
+$ azd config get alpha.deployment.stacks
+"off"
+```
+
+`alpha.deployment.stacks` was still `off` from the prod `--preview` work,
+where Finding 3 requires turning it off. `infra/azure.yaml` hands azd a
+fully populated `deploymentStacks` block — `actionOnUnmanage`,
+`denySettings`, an `excludedActions` list. azd parsed that file, discarded
+the block entirely, deployed as a plain `Microsoft.Resources/deployments`,
+and reported `SUCCESS` without one word about the configuration it had just
+thrown away.
+
+The only tells were both outside the output a person reads: an empty
+`az stack sub list` afterwards, and the deployment name in a portal URL —
+`.../deployments/dev-1788872289` on the plain run versus
+`.../deployments/azd-stack-dev-26090813299ze` once the flag was on.
+
+Two reasons this is worse than Finding 5, which it otherwise resembles.
+Finding 5 at least left a wrong resource-group name visible in the plan.
+Here there is no tell in the output at all. And azd was not being quiet in
+general on that run — it warned about a reserved word in a firewall rule
+name that turned out to be harmless (Finding 11), while saying nothing about
+silently disabling the entire mechanism the deployment was meant to use. A
+tool that warns about the cosmetic and stays silent on the structural trains
+you to read its warnings as noise.
+
+It also handed this exercise a control group nobody planned. The same
+template, the same parameters, the same subscription, deployed twice within
+the hour — once as a plain deployment and once as a stack — which is what
+makes the comparison below evidence rather than a claim.
+
+### Finding 11 — a linter that predicted certain failure, twice, wrongly
+
+```
+(!) Warning: Resource "quotes-sql-dev-e6oljhc2krrhe/AllowAllWindowsAzureIps"
+    (Microsoft.Sql/servers/firewallRules) contains the reserved word "WINDOWS"
+    Azure does not allow reserved words in resource names.
+    The deployment will fail.
+```
+
+It did not fail. The warning fired on both the plain run and the stack run,
+and both succeeded.
+
+The rule azd is applying is real, but it governs resources with globally
+addressable DNS names. A SQL firewall rule is a child resource with no
+hostname of any kind, so there is nothing for a reserved word to collide
+with. Worse for azd's case, `AllowAllWindowsAzureIps` is not a name anyone
+invented here: it is the exact name the Azure portal itself generates for
+that rule, which is why Day 23 chose it — renaming it would have made the
+template describe something the portal does not produce.
+
+What makes this worth recording is the confidence. Not "this may fail" or
+"check this name" but *"The deployment will fail."* A flat, checkable
+prediction, wrong twice in a row. Acting on it would have meant renaming a
+correct resource to fix a problem that does not exist — and the prompt it
+gates (`Proceed with provisioning despite the warnings above?`) is
+engineered to make proceeding feel like the reckless choice.
+
+Set against Finding 4, the pair is almost too neat: there, every static
+check passed clean and the real deployment failed on a subscription quota;
+here a static check declared certain failure and the deployment succeeded.
+In both cases the check was not examining the thing it claimed to rule on.
+
+### Finding 12 — "deployment failed" when the deployment had succeeded
+
+A later stack run ended like this:
+
+```
+  (✓) Done: Resource group: rg-quotes-dev (4.809s)
+  (✓) Done: Service Bus Namespace: quotes-sb-dev-e6oljhc2krrhe (1.808s)
+  (✓) Done: Azure SQL Server: quotes-sql-dev-e6oljhc2krrhe (9.421s)
+ERROR: deployment failed: error deploying infrastructure: deploying to
+subscription: Get "https://management.azure.com/subscriptions/109b67f4-.../
+deploymentStackOperationStatus/e13f50f6-...": dial tcp: lookup
+management.azure.com: no such host
+```
+
+Then, minutes later, with no further commands run against Azure:
+
+```
+$ az stack sub list -o table
+Name           State      Last Modified
+-------------  ---------  --------------------------------
+azd-stack-dev  succeeded  2026-09-08T13:34:47.990063+00:00
+```
+
+The timestamp is *after* the error. The DNS lookup failed inside azd's
+polling loop; a deployment stack operation is asynchronous, so Azure carried
+on and finished it while azd could no longer see it. Nothing was wrong with
+the template, the parameters or the stack.
+
+The error message describes the deployment. What failed was azd's
+*knowledge* of the deployment, and the two are not the same thing. The tell
+is inside the error itself: the failing call is a `Get` on
+`deploymentStackOperationStatus` — a read. A failed read cannot fail a
+write. But the sentence in front of it says `deployment failed`, so the
+natural next move is to re-run a deployment that already worked, or to start
+debugging a template that was never at fault.
+
+Together with Findings 5 and 10, that is three occasions in one session
+where azd's report and Azure's state disagreed, plus Finding 11 predicting a
+failure that never happened. The common shape: azd reports on its own view,
+and that view can be stale, partial, or about something other than what the
+message claims. The habit worth keeping is to confirm against the resource
+provider — `az stack sub list`, `az resource list` — rather than against the
+tool that just told you what it thinks it did.
+
+### Finding 13 — `shell: pwsh` names a shell this machine does not have
+
+```
+WARNING: PowerShell 7 (`pwsh`) commands found in project. Your computer only
+has PowerShell 5.1 (`powershell`) installed. azd will use `powershell` but
+errors may occur.
+```
+
+`infra/azure.yaml` declares `shell: pwsh` for the `preprovision` hook —
+azd's hook shells are `pwsh` or `sh`, so there is no way to *declare* 5.1 —
+and this machine has only 5.1. azd substituted it and carried on.
+
+"Errors may occur" is doing a great deal of work in that sentence, and
+Finding 9 is what it looks like when they do: 5.1 is precisely the shell
+whose stderr-redirection behaviour turned an azd update banner into a fatal
+error in `azd-provision.ps1`. The same substitution applies to the
+`preprovision` hook, which survives only because `select-bicepparam.ps1`
+does one `Copy-Item` and touches no native command's stderr.
+
+So the warning and Finding 9 are one root cause seen from two directions: a
+project that says `pwsh`, a machine that has 5.1, and no error until a script
+happens to depend on a behaviour that differs between them. Installing
+`pwsh` would make the declaration true and is the real fix; until then, the
+wrapper is written to be correct on both, which is why Finding 9's helper
+relaxes `$ErrorActionPreference` rather than relying on the PowerShell 7-only
+`$PSNativeCommandUseErrorActionPreference`.
+
 ## What Deployment Stacks add over Day 23's plain deployments
+
+**One line, since the exercise asks for one:** a plain deployment has no
+memory of what it created, so nothing can be reliably deleted, and nothing
+can be protected; a Deployment Stack is that memory, which is why `azd down`
+either lies about success or genuinely tears the environment down depending
+on whether one exists.
+
+That is not a paraphrase of the documentation. Finding 10 accidentally
+produced the control group: the same template, same parameters, same
+subscription, deployed twice inside an hour — once with
+`alpha.deployment.stacks` off and once on.
+
+| | plain deployment | deployment stack |
+|---|---|---|
+| deployment name | `dev-1788872289` | `azd-stack-dev-26090813299ze` |
+| `az stack sub list` | *(empty)* | `azd-stack-dev  succeeded` |
+| resources created | all six | all six, adopted, not rebuilt |
+| record of what it manages | none | the stack's `resources` list |
+| `denySettings` from `azure.yaml` | silently discarded | applied as deny assignments |
+| `azd down` | 5 seconds, deletes nothing, reports success (Finding 2) | deletes the group, SQL server and namespace (Finding 4) |
+
+The last row is the one that matters, and it is the only row where the
+difference is visible to someone who is not looking for it. Both halves are
+recorded earlier in this file, from two runs a day apart with the same two
+commands and opposite outcomes: `azd down --force --purge` against no stack
+finished in 5 seconds having deleted nothing at all, and reported
+`SUCCESS: Your application was removed from Azure` — the dangerous kind of
+false positive, because the message reads as "you're done" and nothing
+prompts a second look. The same command against a real stack took 8 minutes
+44 seconds and left `ResourceGroupNotFound`.
+
+The second-order point is the interesting one though. A stack is the only
+thing in this exercise that knows the difference between *this template's
+resources* and *everything else in the subscription* — which is exactly why
+Finding 7's borrowed environment is passed in as an ID and never declared
+`existing`. Once teardown is one command that genuinely deletes things, what
+the stack does **not** manage stops being a technicality and becomes the
+safety boundary.
 
 A plain `az deployment sub create` — or `azd provision` without
 `alpha.deployment.stacks` — only ever adds and updates; it has no memory of
@@ -610,14 +855,10 @@ Azure RBAC deny assignment on every resource the stack manages (with the
 caveat in "What would break this," below: it doesn't stop a write, only a
 delete).
 
-"Every resource the stack manages" is also the precise reason Finding 7's
-borrowed environment is passed in as an ID rather than declared `existing`.
-A Deployment Stack's whole value is that it has an opinion about the
-resources in its scope — `actionOnUnmanage: delete` and a deny assignment on
-each one. That is exactly what you want pointed at this stack's SQL server
-and exactly what you do not want pointed at the live app's environment. Once
-teardown is a single command that genuinely deletes things, what the stack
-does *not* manage stops being a technicality.
+A Deployment Stack's `actionOnUnmanage: delete` and its per-resource deny
+assignments apply to what it manages and nothing else. That is exactly what
+you want pointed at this stack's SQL server, and exactly what you do not
+want pointed at the live app's environment.
 
 ## GitHub link
 
@@ -652,7 +893,18 @@ else's environment. Sharing infrastructure invalidates every assumption of
 the form "this stack is alone in here," and naming is the one that hides
 best.
 
-The wider version, which all nine findings point at: a plan is only
+And the thing I'll actually carry: **confirm against the resource
+provider, not against the tool.** Four times in one session azd's output and
+Azure's real state disagreed — a plan that silently used the wrong
+environment's parameters (5), a `SUCCESS` that quietly wasn't a Deployment
+Stack at all (10), a linter twice predicting certain failure that never came
+(11), and an `ERROR: deployment failed` for a deployment that had already
+succeeded while a DNS lookup broke in the polling loop (12). None of those
+are bugs I could have avoided. What I can change is what I treat as
+evidence: `az stack sub list` and `az resource list` describe Azure, and
+`SUCCESS` describes what a tool believes about itself.
+
+The wider version, which most of the thirteen point at: a plan is only
 evidence about the things it actually checks. `what-if` validated the
 template, the parameter types and the RBAC, then reported
 `NestedDeploymentShortCircuited` on the two modules it couldn't reach — and

@@ -204,6 +204,28 @@ Drop the switch on any subscription with room and the template creates its own
 environment and workspace exactly as Day 23 did — that path is unchanged and
 still the default.
 
+Verify the result against Azure rather than against azd's exit message. With
+`alpha.deployment.stacks` off — which the prod plan below requires — all of
+this still deploys and still prints `SUCCESS`, as a plain deployment, with
+this project's whole `deploymentStacks` block silently ignored:
+
+```powershell
+azd config get alpha.deployment.stacks   # expect "on"
+az stack sub list -o table               # expect: azd-stack-dev  succeeded
+az resource list -g rg-quotes-dev -o table
+```
+
+The deployed dev stack, for reference — note the container app's region, and
+the absence of a Log Analytics workspace, both consequences of borrowing the
+environment:
+
+| Resource | Region |
+|---|---|
+| `quotes-id-dev` | centralindia |
+| `quotes-sb-dev-<token>` | centralindia |
+| `quotes-sql-dev-<token>` + `quotesdb` | centralindia |
+| `quotes-api-dev` | **southindia** (its environment's region) |
+
 `azd-provision.ps1`, not `azd provision` directly - the parameters file
 (`main.bicepparam`) has to exist before azd resolves parameters, one step
 earlier than a `preprovision` hook runs. Skipping the wrapper doesn't just

@@ -59,6 +59,14 @@ infra:
 # nothing and re-asserts that the file on disk matches the environment actually
 # being deployed - which is worth having if someone calls `azd provision`
 # directly, even though by then it can only correct the *next* run.
+#
+# `shell: pwsh` names PowerShell 7. azd's hook shells are pwsh or sh, so 5.1
+# cannot be declared - and on a machine with only 5.1 azd substitutes it and
+# warns "errors may occur" (Days/day-24, Finding 13). This hook survives that
+# substitution because select-bicepparam.ps1 does one Copy-Item and never
+# redirects a native command's stderr, which is the 5.1 behaviour that killed
+# azd-provision.ps1 in Finding 9. Anything added here should be written to run
+# under both, or pwsh should be installed.
 hooks:
   preprovision:
     shell: pwsh
