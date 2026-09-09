@@ -31,10 +31,25 @@ jobs:
     # invalid administrator - good behaviour at deploy time, and the reason this
     # job has to supply something. The real values come from the operator's own
     # shell (see infra/README.md); nothing here grants access to anything.
+    #
+    # JWT_SIGNING_KEY is here for the same reason and with the same caveat.
+    # Day 24 made apiJwtSigningKey a readEnvironmentVariable with no default,
+    # deliberately - an unset signing key should fail at build-params rather
+    # than three minutes into a container restart loop. The side effect nobody
+    # traced at the time is that it also fails *here*, because this job
+    # type-checks both parameter files and had no such variable. So this job
+    # has been red on every infra push since df9ce84.
+    #
+    # The value below is not a key and is not usable as one: this job only ever
+    # runs `bicep build-params`, which type-checks the file and never deploys,
+    # so nothing is ever signed with it. It is long enough to be shaped like
+    # the real thing and named so that anyone finding it in a log knows what it
+    # is not.
     env:
       SQL_AAD_ADMIN_LOGIN: placeholder@example.invalid
       SQL_AAD_ADMIN_OBJECT_ID: '00000000-0000-0000-0000-000000000000'
       API_CONTAINER_IMAGE: 'mcr.microsoft.com/k8se/quickstart:latest'
+      JWT_SIGNING_KEY: 'ci-placeholder-never-signs-anything-not-a-real-key-000000'
 
     steps:
       - uses: actions/checkout@v4

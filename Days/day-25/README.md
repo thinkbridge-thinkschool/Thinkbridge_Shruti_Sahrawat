@@ -375,6 +375,54 @@ rather than guessed at. The safe operational answer either way is to check
 it prevents does not appear until the *next* deployment, by which time the
 cause is a week behind you.
 
+### Finding 6 — CI had been red since Day 24, and Day 25 is only where it was noticed
+
+Pushing Day 25 turned the `Infra (Bicep)` check red:
+
+```
+checking infra/main.dev.bicepparam
+ERROR: infra/main.dev.bicepparam(206,50) : Error BCP427: Environment variable
+"JWT_SIGNING_KEY" does not exist and there's no default value set.
+```
+
+The cause is not in Day 25. `git log -S` puts it in `df9ce84` — Day 24's
+Finding 16, which made `apiJwtSigningKey` a `readEnvironmentVariable` with no
+default on purpose, so that an unset signing key fails at `build-params`
+rather than three minutes into a container restart loop. That reasoning is
+right and the parameter should stay as it is.
+
+What it missed is that `.github/workflows/infra.yml` type-checks both
+parameter files on every `infra/**` push, and its `env:` block — placeholders
+for the SQL admin and the container image — had no such variable. So the
+guardrail worked exactly as designed and pointed at CI, which nobody was
+watching. The job has been failing on every infra push since that commit.
+
+Reproduced locally with only the four variables the workflow sets, which also
+showed the part CI never got to:
+
+```
+BEFORE:  FAIL main.dev.bicepparam  (206,50) BCP427
+         FAIL main.prod.bicepparam (191,50) BCP427
+AFTER:   PASS both
+```
+
+Prod fails identically, and CI never reported it because `set -euo pipefail`
+stops at the first failure — so fixing only the error the log named would have
+produced a second red run for the file it hadn't reached yet.
+
+Fixed by adding `JWT_SIGNING_KEY` to the workflow's existing placeholder
+block. The value is not a key and cannot become one: this job runs
+`bicep build-params`, which type-checks and never deploys, so nothing is ever
+signed with it — the same argument the file already makes for the placeholder
+SQL admin object ID.
+
+The transferable point is about what a green pipeline is worth. Days 23 and 24
+both describe this job as the thing that stops an invalid template being
+discovered three weeks later by whoever was counting on it. It could not have
+done that for the last two commits, because it was already failing and the
+failure had become the normal state. A check nobody looks at is a check that
+has stopped running.
+
 ## Files
 
 | File | What changed |
