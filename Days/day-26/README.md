@@ -382,7 +382,9 @@ idempotent and matches both migrations column-for-column.
 
 ## GitHub link
 
-<!-- filled in after push -->
+https://github.com/thinkbridge-thinkschool/Thinkbridge_Shruti_Sahrawat/tree/main/Days/day-26
+
+Commit `24a54f8`.
 
 ## What did you learn this session?
 

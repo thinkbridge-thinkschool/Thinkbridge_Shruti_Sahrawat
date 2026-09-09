@@ -234,8 +234,9 @@ Quotes.Tests.Integration` passes 54/54, unchanged - this exercise added no
 HTTP-level behaviour to any existing endpoint, so nothing there had reason to
 move.
 
-Two test failures on the way here, both fixed rather than worked around, and
-both about the same underlying hazard: a single "total budget bounds the
+Two test failures on the way here - and two more, later, on Day 26's push -
+all fixed rather than worked around, and all about the same underlying
+hazard: a single "total budget bounds the
 whole operation" test that asserted on *which* Polly strategy claimed a
 cancellation, rather than on the operation's actual, runner-independent
 behaviour. First locally: the test set `TotalRequestTimeout` to an exact
@@ -262,11 +263,66 @@ isn't strictly smaller than the total can never fire first - that guard
 exists precisely to catch this shape of misconfiguration, and it caught it
 here too, in a test, before it could reach anything real. The corrected
 version keeps that invariant and proves the same thing a different way: an
-upstream that fails fast (a 503 in ~50ms, nowhere near its own 300ms
-attempt timeout) is retried without backoff against a 700ms total budget,
-so roughly a dozen ordinary, individually-fast attempts accumulate past the
-budget - no single attempt ever times out on its own, only their sum does,
-which is the actual Day 5 gap. The second test proves the companion fact -
+upstream that fails fast, nowhere near its own attempt timeout, is retried
+without backoff until the accumulation of ordinary, individually-fast
+attempts runs past the total budget - no single attempt ever times out on
+its own, only their sum does, which is the actual Day 5 gap.
+
+That version was first written as a 503 in ~50ms against a 300ms attempt
+timeout inside a 700ms total budget, and it failed on CI a third time,
+weeks later, on Day 26's push - in the mirror image of the second failure.
+`AttemptTimeouts` came back `1` instead of `0`: a stall of only ~250ms on a
+shared runner is enough for a "50ms" attempt to overrun its own 300ms
+timeout and claim the cancellation itself, which is precisely the thing
+that assertion says never happens.
+
+The obvious repair - widen every margin, to ~10ms of work against a 900ms
+attempt timeout inside a 1250ms budget - was wrong, and wrong in a useful
+way: it made the test fail *more* often, eight runs in ten instead of one
+in six. Stretching the budget-to-work ratio from ~14 attempts to ~100 had
+multiplied the number of retry boundaries by seven, and a retry boundary
+turned out to be where the real hazard lives.
+
+The mechanism, finally. A budget can expire at two kinds of instant, and
+this pipeline reports them differently. Expire *inside* an attempt: the
+cancellation surfaces as an `OperationCanceledException`, Polly's timeout
+strategy converts it to `TimeoutRejectedException`, `UpstreamClient` maps
+that to `TimedOut`, and the strategy's `OnTimeout` callback records a total
+timeout. Expire *at a retry boundary*: Polly's retry strategy finds the
+ambient token already cancelled, stops retrying, and returns the last
+outcome it actually holds - a real 503 the dependency really sent. Nothing
+is thrown, so `SendAsync` returns a response, `UpstreamClient` reports
+`UpstreamFailure`, and since the timeout strategy caught nothing,
+`OnTimeout` never runs and `TotalTimeouts` stays `0`. One event, two
+labels. On this machine the boundary path is the common one, roughly eight
+runs in ten.
+
+So the assertions were not mistuned, they were unassertable - and loosening
+one only uncovered the next. `Outcome` had been failing first and masking
+`TotalTimeouts`, which failed the instant the outcome assertion stopped
+short-circuiting. What survives is arithmetic: retry exhaustion would need
+1 initial attempt plus all 1000 retries and about ten seconds of work, so a
+call that ended after ~1.25s having made well under 1001 attempts was ended
+by its budget and by nothing else. The test asserts that - elapsed time
+bounded above and below, an attempt count far under the retry ceiling, at
+least two attempts, and at most one attempt timeout (the interrupted one,
+which the inner strategy may misattribute at a genuine tie) - and lets the
+outcome be either label. Four failures on one test, and the lesson only
+landed on the fourth: the first three fixes each moved a number until the
+test passed, which is tuning. The test was asking which timer won, and no
+arrangement of numbers answers a question that has no stable answer.
+
+One finding here is about the application rather than the test, and is
+recorded rather than fixed. A caller who exhausts an 8-second budget will
+usually be told the dependency answered 503, and `TotalTimeouts` will not
+move - so that counter undercounts budget exhaustions, and an alert keyed
+on timeouts would miss most of them. Making it deterministic means marking
+the resilience context when the total timeout fires and having
+`UpstreamClient` check that mark before trusting a returned response. That
+changes shipped behaviour rather than a test, so it is named here as a
+known gap instead of being changed quietly under a CI fix.
+
+The second test proves the companion fact -
 that the budget leaves room for more than one attempt, not just one - with
 a ten-second total against four 100ms-attempt-timeout retries (400ms of
 expected work), asserting on the attempt count directly rather than on
