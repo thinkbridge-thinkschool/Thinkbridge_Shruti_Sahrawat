@@ -65,6 +65,14 @@ var defaultTags = union(tags, {
 var resolvedSqlServerName = empty(sqlServerName) ? '${namePrefix}-sql-${environmentName}-${resourceToken}' : sqlServerName
 var resolvedServiceBusNamespaceName = empty(serviceBusNamespaceName) ? '${namePrefix}-sb-${environmentName}-${resourceToken}' : serviceBusNamespaceName
 
+// Key Vault names cap at 24 characters, where SQL and Service Bus allow far
+// more - so this one cannot reuse the `${prefix}-${kind}-${env}-${token}`
+// shape the other two share. `quotes-kv-prod-<13-char token>` is 27 and would
+// fail at deploy time on a length rule, not at build. Dropping the prefix
+// keeps it at 20-21 and still globally unique, since the token is what
+// provides uniqueness in every one of these names anyway.
+var resolvedKeyVaultName = empty(keyVaultName) ? 'kv-${environmentName}-${resourceToken}' : keyVaultName
+
 // The container app's region: the stack's, unless a borrowed environment pins
 // it somewhere else.
 //
@@ -188,6 +196,13 @@ that found it.
 @secure()
 param apiJwtSigningKey string
 
+@description('Key Vault name. Globally unique, 3-24 characters. Generated from the environment and the deterministic token when left empty.')
+@maxLength(24)
+param keyVaultName string = ''
+
+@description('Purge protection on the vault. False by default - see modules/keyvault.bicep for why a stack torn down as often as this one cannot have it on.')
+param keyVaultEnablePurgeProtection bool = false
+
 @description('Log Analytics retention. The workspace is part of the API module because a container apps environment cannot exist without one. Ignored when existingManagedEnvironmentId is set, because no workspace is created then either.')
 @minValue(30)
 @maxValue(730)
@@ -284,6 +299,23 @@ module serviceBus 'modules/servicebus.bicep' = {
   }
 }
 
+// The vault, and the one role assignment that lets the API read out of it.
+// Placed after identity because the role assignment needs a principal, and
+// before api because the container app resolves its Key Vault reference at
+// create time - see the dependsOn on the api module below.
+module keyVault 'modules/keyvault.bicep' = {
+  scope: rg
+  name: 'keyvault'
+  params: {
+    name: resolvedKeyVaultName
+    location: location
+    tags: defaultTags
+    principalId: identity.outputs.principalId
+    jwtSigningKey: apiJwtSigningKey
+    enablePurgeProtection: keyVaultEnablePurgeProtection
+  }
+}
+
 // Only when the image comes from a private registry this stack does not own.
 // Scoped to the registry's own resource group, which is the whole reason main
 // is subscription-scoped: a group-scoped template cannot grant a role on a
@@ -322,10 +354,24 @@ module api 'modules/api.bicep' = {
     serviceBusFqdn: serviceBus.outputs.fullyQualifiedNamespace
     schemaBootstrap: apiSchemaBootstrap
     aspNetCoreEnvironment: apiAspNetCoreEnvironment
-    jwtSigningKey: apiJwtSigningKey
+    jwtSecretUri: keyVault.outputs.jwtSecretUri
+    keyVaultIdentityResourceId: identity.outputs.resourceId
   }
   dependsOn: [
     registryAccess
+    // No explicit keyVault entry here, and that is worth stating because the
+    // first draft had one. The container app resolves its Key Vault reference
+    // at create time, so it needs the *role assignment* inside the keyvault
+    // module to exist first - and the instinct was to depend on the module to
+    // guarantee that. The strict linter rejected it as redundant
+    // (no-unnecessary-dependson), and the linter is right: reading
+    // keyVault.outputs.jwtSecretUri below already depends on the whole nested
+    // deployment, which does not report outputs until every resource in it -
+    // vault, secret and role assignment - has finished. Adding the dependency
+    // by hand expressed a guarantee the reference had already made.
+    //
+    // What neither expresses is RBAC *propagation*, which is eventual and can
+    // outrun any ordering ARM understands; see Days/day-25.
   ]
 }
 
@@ -345,6 +391,9 @@ output serviceBusTopic string = serviceBus.outputs.topicName
 output managedIdentityClientId string = identity.outputs.clientId
 output managedIdentityPrincipalId string = identity.outputs.principalId
 output managedIdentityName string = identity.outputs.name
+output keyVaultName string = keyVault.outputs.vaultName
+output keyVaultUri string = keyVault.outputs.vaultUri
+output jwtSecretUri string = keyVault.outputs.jwtSecretUri
 
 @description('The environment the API actually runs in, whether this stack created it or borrowed an existing one.')
 output apiManagedEnvironmentId string = api.outputs.managedEnvironmentId

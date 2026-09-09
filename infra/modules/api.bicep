@@ -114,22 +114,32 @@ param schemaBootstrap string
 param aspNetCoreEnvironment string
 
 @description('''
-HMAC-SHA256 signing key for issued JWTs. Required - Program.cs throws on
-startup in Production if this is empty or under 32 UTF-8 bytes, and this
-module always sets ASPNETCORE_ENVIRONMENT=Production (dev included), so there
-is no environment where this can be skipped.
+Key Vault URI of the JWT signing secret, e.g.
+https://kv-dev-abc123.vault.azure.net/secrets/jwt-key
 
-No default, deliberately, on the same reasoning apiContainerImage uses in
-prod: a deployment that silently ran with no signing key would be a server
-issuing tokens under a key nobody recorded, or - had a placeholder default
-been used instead - a key checked into this file, which is exactly the
-failure mode the app's own startup check exists to prevent. Generate one with
-`[Convert]::ToBase64String((New-Object byte[] 48 | %{ [System.Security.Cryptography.RandomNumberGenerator]::Fill($_); $_ }))`
-and set it once per environment with `azd env set JWT_SIGNING_KEY <value>` -
-never in a committed .bicepparam file.
+Day 24 passed the key itself here as a @secure() param and stored it in the
+container app's own secret store. Day 25 replaced that with a reference: this
+module no longer receives, sees, or stores the signing key at all - only the
+address of a secret it is allowed to read, and the identity it reads it with.
+
+Versionless (no trailing GUID) so a rotation in the vault is picked up without
+a redeployment.
 ''')
-@secure()
-param jwtSigningKey string
+param jwtSecretUri string
+
+@description('''
+Resource ID of the identity the container app authenticates to Key Vault with.
+Normally the same user-assigned identity as everything else in this stack -
+passed separately from identityResourceId only because the platform requires
+it named on the secret itself, not inherited from the app.
+
+This identity must already hold Key Vault Secrets User on the vault before
+this resource is created. Container Apps resolves the reference at create
+time, not at container start, so a missing or unpropagated role assignment
+fails the deployment rather than producing an app that starts and then cannot
+read its key.
+''')
+param keyVaultIdentityResourceId string
 
 @description('Port the container listens on. 8080 is what QuotesApi\'s Dockerfile exposes.')
 param targetPort int = 8080
@@ -270,16 +280,28 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           identity: identityResourceId
         }
       ]
-      // Container Apps' own secret store, not Key Vault - matching what the
-      // live app already does (`az containerapp secret list` on quotes-api
-      // shows the identical name). A secret here is masked in `show`/`list`
-      // output and in the deployment's parameter history, which a plain env
-      // var would not be; it is a smaller guarantee than Key Vault, and the
-      // right-sized one for a single signing key with no rotation story yet.
+      // Day 25: a Key Vault reference, not a value.
+      //
+      // What was here through Day 24 was `value: jwtSigningKey` - the key
+      // itself, stored in the container app's own secret store. Masked in
+      // `az containerapp show`, which is why it was defensible, but owned by
+      // the app: anyone with write access to the container app could read it
+      // back, it had no version history, and rotating it meant redeploying
+      // the app.
+      //
+      // With keyVaultUrl + identity the app stores no secret value at all.
+      // `az containerapp secret list` returns the URI, the identity and the
+      // name, and no `value` field at all - not a masked one, not an empty
+      // string, absent - because there is no value here to return. The
+      // platform fetches the secret from the vault, as this identity, at
+      // resolve time. Verified against the deployed app; see Days/day-25. That is the
+      // difference the exercise's "prove there are zero secrets in app
+      // settings" is actually asking about.
       secrets: [
         {
           name: 'jwt-key'
-          value: jwtSigningKey
+          keyVaultUrl: jwtSecretUri
+          identity: keyVaultIdentityResourceId
         }
       ]
     }
