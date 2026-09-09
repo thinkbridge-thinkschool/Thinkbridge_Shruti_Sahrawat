@@ -1,3 +1,6 @@
+using Azure.Monitor.OpenTelemetry.Exporter;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using Microsoft.EntityFrameworkCore;
 using Quotes.Messaging;
 using Quotes.Messaging.Data;
@@ -44,6 +47,53 @@ builder.Services.AddSingleton(_ => ServiceBusClientFactory.Create(settings));
 var instanceId = Environment.GetEnvironmentVariable("WORKER_INSTANCE")
                  ?? $"pid-{Environment.ProcessId}";
 builder.Services.AddSingleton(new WorkerInstance(instanceId));
+
+// ---------------------------------------------------------------------------
+// Day 26 - telemetry.
+//
+// The far end of the trace. The Service Bus SDK reads the context off the
+// incoming message and continues the trace the API started, so the consumer's
+// work and the SQLite writes underneath it land in the same end-to-end view
+// rather than in an operation of their own.
+//
+// AddSource("Azure.*") is what captures the Service Bus SDK's own spans. Those
+// are the spans that carry trace context onto (and off) the wire, so without
+// this line the process still reports its own work and still stitches to
+// nothing - the most misleading possible half-success, because telemetry
+// appears to be working.
+// ---------------------------------------------------------------------------
+
+// Belt and braces. Azure SDK distributed tracing was gated behind this switch
+// while it was experimental; it is on by default in current versions
+// (Azure.Messaging.ServiceBus 7.18.2 here), so this is expected to be a no-op.
+// It is set anyway because the failure it prevents - no Service Bus spans at
+// all, therefore no stitched trace - is silent, and the cost of setting a
+// switch nothing reads is nothing.
+AppContext.SetSwitch("Azure.Experimental.EnableActivitySource", true);
+
+var appInsightsConnectionString =
+    builder.Configuration["ApplicationInsights:ConnectionString"]
+    ?? builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"];
+
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(r => r.AddService(
+        serviceName: "Quotes.Worker",
+        serviceVersion: "1.0.0"))
+    .WithTracing(t =>
+    {
+        t.AddSource("Azure.*")
+         .AddEntityFrameworkCoreInstrumentation();
+
+        // No connection string means no exporter, exactly as QuotesApi does
+        // it: a process that cannot reach App Insights should run normally and
+        // export nothing, not fail to start and not spend every span on a
+        // doomed network call.
+        if (!string.IsNullOrWhiteSpace(appInsightsConnectionString))
+        {
+            t.AddAzureMonitorTraceExporter(o => o.ConnectionString = appInsightsConnectionString);
+        }
+    });
+
 
 if (verb == "worker")
 {

@@ -55,6 +55,34 @@ public class OutboxMessage
     /// <summary>Null until the relay has published this row.</summary>
     public DateTime? SentAt { get; private set; }
 
+    /// <summary>
+    /// The W3C traceparent of the request that wrote this row, or null when
+    /// there was no ambient trace.
+    /// </summary>
+    /// <remarks>
+    /// Day 26. An outbox is a store-and-forward boundary, and a trace does not
+    /// survive one by itself: the request that writes this row finishes and
+    /// its Activity ends, then the relay picks the row up later, in a
+    /// different process, with no ambient context at all. Whatever it publishes
+    /// then starts a brand-new trace, so App Insights shows the API's work and
+    /// the worker's work as two unrelated operations that happen to be about
+    /// the same quote. The end-to-end view the outbox is supposed to be
+    /// invisible to is exactly the view it breaks.
+    ///
+    /// Carrying the traceparent in the row is what stitches the two halves
+    /// back together. The relay reads it and starts its publish Activity with
+    /// this as the parent, so the Service Bus message carries a context
+    /// descended from the original request and the consumer continues the same
+    /// trace. See Quotes.Outbox.OutboxRelay and Days/day-26.
+    ///
+    /// Nullable on purpose, in both senses. Rows written before this column
+    /// existed have no context to carry, and a row written outside any trace
+    /// (a background job, a test) legitimately has none either - neither is an
+    /// error, and neither should stop the relay publishing. A missing parent
+    /// costs the stitching, not the message.
+    /// </remarks>
+    public string? TraceParent { get; private set; }
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private OutboxMessage() { } // Required for EF Core
@@ -80,6 +108,15 @@ public class OutboxMessage
             EventType = eventType,
             Payload = JsonSerializer.Serialize(payload, JsonOptions),
             OccurredAt = occurredAt.UtcDateTime,
+
+            // Activity.Current, read here rather than passed in, because the
+            // caller is a repository in the middle of a domain operation and
+            // has no business knowing about tracing. Null outside a trace,
+            // which is a normal state and not an error - see TraceParent.
+            //
+            // Id is the W3C traceparent string when the process uses the W3C
+            // format, which .NET has defaulted to since 5.0.
+            TraceParent = System.Diagnostics.Activity.Current?.Id,
         };
     }
 

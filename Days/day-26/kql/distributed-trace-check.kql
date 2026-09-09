@@ -1,0 +1,29 @@
+// Does the trace actually stitch API -> relay -> worker?
+//
+// This is the query that answers the exercise's "confirm distributed tracing
+// stitches API -> worker -> DB", and it answers it by construction rather than
+// by eyeballing a diagram: it groups every span by operation_Id - the trace id
+// - and keeps only the traces in which more than one service took part.
+//
+// Before Day 26's outbox change this query returned nothing, and that is the
+// whole finding. The API's trace ended when it wrote the outbox row; the relay
+// began a new one when it published. Two traces, no operation_Id in common,
+// so no row here could ever contain both services.
+let window = 2h;
+union requests, dependencies
+| where timestamp > ago(window)
+| summarize
+    services = make_set(cloud_RoleName),
+    spans    = count(),
+    started  = min(timestamp),
+    ended    = max(timestamp)
+  by operation_Id
+| extend
+    serviceCount = array_length(services),
+    endToEndMs   = datetime_diff('millisecond', ended, started)
+// The assertion. A trace containing both the API and the worker can only exist
+// if the context survived the outbox and the Service Bus hop.
+| where set_has_element(services, "QuotesApi")
+    and set_has_element(services, "Quotes.Worker")
+| project started, operation_Id, services, serviceCount, spans, endToEndMs
+| order by started desc

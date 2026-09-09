@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -60,6 +61,14 @@ public sealed record OutboxRelayResult(int OutboxId, string MessageId, string Ev
 /// </remarks>
 public sealed class OutboxRelay
 {
+    /// <summary>
+    /// Day 26. The relay's own tracer. Registered with OpenTelemetry by name
+    /// in Program.cs - an ActivitySource nobody has subscribed to is inert, so
+    /// the name here and the AddSource there have to agree or every span this
+    /// class starts silently goes nowhere.
+    /// </summary>
+    public static readonly ActivitySource ActivitySource = new("Quotes.Outbox.Relay");
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly OutboxDbContext _db;
@@ -155,6 +164,34 @@ public sealed class OutboxRelay
     /// </remarks>
     private async Task PublishOneAsync(OutboxRecord row, CancellationToken cancellationToken)
     {
+        // Day 26 - the one line that makes the trace survive the outbox.
+        //
+        // `parentId` is the W3C traceparent QuoteRepository recorded on the row
+        // when the request wrote it. Starting the publish Activity with that as
+        // its parent puts this span in the *original request's* trace rather
+        // than in a new one, and because the Azure Service Bus SDK injects
+        // whatever context is current when a message is sent, the message
+        // carries a context descended from the API request. The consumer picks
+        // that up and continues the same trace, which is what produces a single
+        // end-to-end view spanning API -> relay -> Service Bus -> worker -> DB.
+        //
+        // A null or malformed parentId is not an error: StartActivity simply
+        // begins a root span, the publish proceeds exactly as before, and all
+        // that is lost is the stitching. Rows written before this column
+        // existed take that path, which is why the column had to be nullable.
+        using var activity = ActivitySource.StartActivity(
+            "OutboxRelay.Publish",
+            ActivityKind.Producer,
+            parentId: row.TraceParent);
+
+        // Enough to identify the row from the span without opening the
+        // database, and no payload - the payload is a domain event that can
+        // contain user text, and telemetry is not the place for it.
+        activity?.SetTag("outbox.id", row.Id);
+        activity?.SetTag("outbox.message_id", row.MessageId);
+        activity?.SetTag("outbox.event_type", row.EventType);
+        activity?.SetTag("outbox.trace_restored", row.TraceParent is not null);
+
         switch (row.EventType)
         {
             case QuoteEventTypes.QuoteCreated:

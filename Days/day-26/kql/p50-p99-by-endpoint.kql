@@ -1,0 +1,29 @@
+// Latency by endpoint: p50, p95, p99, and the error rate beside them.
+//
+// p50 and p99 together, never p50 alone or an average. A mean hides the tail
+// entirely - one 9-second request among a hundred 50ms ones moves the average
+// by 90ms and moves p99 to 9 seconds, and it is the second number that
+// describes what a user actually hit. p95 is included as the middle sighting:
+// when p95 is healthy and p99 is not, the problem is a small, specific set of
+// requests (one slow query plan, one large tenant) rather than general load.
+//
+// Grouped by cloud_RoleName as well as operation_Name because this App
+// Insights receives telemetry from three processes (QuotesApi, Quotes.Outbox,
+// Quotes.Worker). Without the role, an endpoint's numbers could silently
+// include another service's identically-named operation.
+requests
+| where timestamp > ago(1h)
+| summarize
+    calls      = count(),
+    failures   = countif(success == false),
+    p50        = percentile(duration, 50),
+    p95        = percentile(duration, 95),
+    p99        = percentile(duration, 99),
+    maxMs      = max(duration)
+  by cloud_RoleName, operation_Name
+// round() because a p99 quoted to nine decimal places implies a precision
+// that a percentile over a few hundred samples does not have.
+| extend errorRatePct = round(100.0 * failures / calls, 2)
+| project cloud_RoleName, operation_Name, calls, errorRatePct,
+          p50 = round(p50, 1), p95 = round(p95, 1), p99 = round(p99, 1), maxMs = round(maxMs, 1)
+| order by p99 desc

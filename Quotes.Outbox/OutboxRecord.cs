@@ -8,7 +8,7 @@ namespace Quotes.Outbox;
 /// because the relay has no business rules about an outbox row beyond "mark
 /// it sent". <c>QuotesApi.Models.OutboxMessage</c> is the type that enforces
 /// those rules on the write side; this type only has to describe the same
-/// five columns so <see cref="OutboxDbContext"/> can read and update them.
+/// six columns so <see cref="OutboxDbContext"/> can read and update them.
 /// Two types mapping one physical table is the same shape Day 19 already
 /// chose for messaging generally - <c>MessagingDbContext</c> is a separate
 /// context from <c>QuotesDbContext</c> because the consumer is a different
@@ -26,4 +26,11 @@ public sealed class OutboxRecord
     public string Payload { get; set; } = string.Empty;
     public DateTime OccurredAt { get; set; }
     public DateTime? SentAt { get; set; }
+
+    /// <summary>
+    /// W3C traceparent of the request that wrote the row, or null. Day 26 -
+    /// the relay starts its publish Activity with this as the parent so the
+    /// trace survives the outbox. See QuotesApi.Models.OutboxMessage.
+    /// </summary>
+    public string? TraceParent { get; set; }
 }

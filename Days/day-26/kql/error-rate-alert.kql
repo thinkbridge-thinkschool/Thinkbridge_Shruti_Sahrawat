@@ -1,0 +1,31 @@
+// The alert query: server error rate over a 5-minute window.
+//
+// Shaped to return rows ONLY when the condition is breached, so the alert rule
+// is `count > 0` and every threshold lives here, in version control, where it
+// can be read and reviewed. The alternative - a query returning a number and a
+// threshold configured in the rule - splits the logic across two places, and
+// the half in Azure is the half nobody reviews.
+//
+// A rate, not a count. "More than 10 failures in 5 minutes" fires on a traffic
+// spike where nothing is wrong and stays silent at 3am when two requests out
+// of two fail - the count is lowest exactly when the proportion is worst.
+//
+// 5xx only. `success == false` also counts 4xx, and a 4xx is the caller's
+// mistake, not this service failing. Day 26 hit precisely that: 22 malformed
+// requests (a missing `size` parameter) reported a 100% error rate on an
+// endpoint that was working correctly and rejecting them correctly. Worse, the
+// middleware was returning 500 for them, so they were indistinguishable from
+// real faults until that was fixed too. An alert that cannot tell "we are
+// broken" from "someone sent us rubbish" is an alert that gets muted, and a
+// muted alert is worse than no alert because it still looks like coverage.
+//
+// The `total >= 20` floor is what keeps a rate honest at low volume: without
+// it, one failure against two requests is a 50% error rate at 4am on a system
+// nobody is using.
+requests
+| where timestamp > ago(5m)
+| summarize total = count(), failed = countif(toint(resultCode) >= 500)
+| where total >= 20
+| extend errorRatePct = round(100.0 * failed / total, 2)
+| where errorRatePct > 5
+| project errorRatePct, failed, total

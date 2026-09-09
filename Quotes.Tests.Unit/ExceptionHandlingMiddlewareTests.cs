@@ -182,6 +182,42 @@ public class ExceptionHandlingMiddlewareTests
         body.Length.Should().BeGreaterThan(0);
     }
 
+    [Fact]
+    public async Task InvokeAsync_WhenTheRequestIsMalformed_Returns400NotA500()
+    {
+        // Day 26. BadHttpRequestException is ASP.NET Core reporting that model
+        // binding could not satisfy the handler from what the caller sent - a
+        // missing required query parameter, an unparseable int. Reporting that
+        // as 500 makes the server answer for the client's mistake, and it
+        // lands in the error-rate signal the Day 26 alert watches.
+        var (context, body) = NewContext();
+        var middleware = Middleware(_ => throw new BadHttpRequestException(
+            "Required parameter \"int size\" was not provided from query string."));
+
+        await middleware.InvokeAsync(context);
+
+        context.Response.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+
+        var problem = await ReadProblem(body);
+        problem!.Title.Should().Be("Bad request.");
+        problem.Detail.Should().Contain(
+            "size",
+            "the caller has to be told which parameter is missing - it is the one thing only they can fix");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WhenTheRequestIsMalformed_StillAdvertisesProblemJson()
+    {
+        var (context, body) = NewContext();
+        var middleware = Middleware(_ => throw new BadHttpRequestException("nope"));
+
+        await middleware.InvokeAsync(context);
+
+        context.Response.ContentType.Should().Be(
+            ExceptionHandlingMiddleware.ProblemJsonContentType,
+            "a 400 is still a problem document; only the status and the detail differ from the 500 path");
+    }
+
     [Theory]
     [InlineData(typeof(InvalidOperationException))]
     [InlineData(typeof(ArgumentException))]

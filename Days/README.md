@@ -29,6 +29,7 @@ Quick navigation into each day's brief, code, and evidence. The full narrative (
 | 23 | Bicep IaC | [`Days/day-23/`](day-23/README.md) |
 | 24 | Deployment Stacks + azd | [`Days/day-24/`](day-24/README.md) |
 | 25 | Identity end-to-end | [`Days/day-25/`](day-25/README.md) |
+| 26 | App Insights + KQL | [`Days/day-26/`](day-26/README.md) |
 
 Day 6 was a holiday — no exercise that day.
 

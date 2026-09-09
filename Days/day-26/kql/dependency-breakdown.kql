@@ -1,0 +1,41 @@
+// Where the time actually goes: every outbound call, by type and target.
+//
+// `requests` says an endpoint was slow. This says what it was waiting on -
+// Azure SQL, Service Bus, or an HTTP call - which is the difference between
+// "the API is slow" and a fix.
+//
+// Ordered by totalMs, not by p99, and that ordering is the point. The slowest
+// single dependency is rarely the one worth fixing; the one the system spends
+// the most *aggregate* time inside is. A 5ms call made 40,000 times outranks a
+// 3-second call made twice, and only a sum ranks them that way round.
+//
+// THE EXCLUSION BELOW IS NOT TIDYING. Run without it and the top two rows are
+// the worker's Service Bus receivers at ~1,091,000 ms each - roughly eighteen
+// minutes apiece, against a system that handled one message. That is not load.
+// A message processor holds a long-poll receive open while it waits for work,
+// and the SDK reports the whole wait as dependency duration, so an *idle*
+// consumer accrues the largest number on the page by doing nothing at all.
+//
+// Ranking by aggregate time is correct for dependencies on the request path
+// and actively misleading for a consumer's receive loop, because the two
+// measure different things under the same column name: one is time spent
+// working, the other is time spent waiting to be given work. Excluding the
+// receive loop by name keeps the ranking answering the question it claims to.
+dependencies
+| where timestamp > ago(1h)
+// The receive loop, and only the receive loop. Sends, completes, dead-letters
+// and every other Service Bus operation stay in - they are real work on a real
+// path. `ServiceBusReceiver.Receive*` is the idle wait.
+| where name !startswith "ServiceBusReceiver.Receive"
+    and name !startswith "ServiceBusProcessor.Receive"
+| summarize
+    calls    = count(),
+    failures = countif(success == false),
+    totalMs  = sum(duration),
+    p50      = percentile(duration, 50),
+    p99      = percentile(duration, 99)
+  by cloud_RoleName, type, target, name
+| extend failurePct = round(100.0 * failures / calls, 2)
+| project cloud_RoleName, type, target, name, calls, failurePct,
+          totalMs = round(totalMs, 0), p50 = round(p50, 1), p99 = round(p99, 1)
+| order by totalMs desc

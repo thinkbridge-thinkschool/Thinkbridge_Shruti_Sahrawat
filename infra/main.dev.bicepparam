@@ -201,8 +201,18 @@ param apiAspNetCoreEnvironment = 'Production'
 //
 // Generate one and set it once - never in this file, never committed:
 //   $bytes = [byte[]]::new(48)
-//   [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+//   [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
 //   azd env set JWT_SIGNING_KEY ([Convert]::ToBase64String($bytes))
+//
+// Create().GetBytes(), not the static Fill(). Fill() is .NET Core only and
+// does not exist on the .NET Framework that Windows PowerShell 5.1 runs on -
+// which is the shell most people here actually have, and which this file
+// previously told them to use. It fails in the worst available way: the
+// Fill() line throws, $bytes stays all zeros because [byte[]]::new zeroes it,
+// and the very next line reports success while storing the base64 of 48 zero
+// bytes - a signing key anyone can reproduce in one line. Found by running
+// the documented command on PowerShell 5.1 and watching it half-fail
+// (Days/day-26). Create().GetBytes() works on both.
 param apiJwtSigningKey = readEnvironmentVariable('JWT_SIGNING_KEY')
 
 param logAnalyticsRetentionInDays = 30

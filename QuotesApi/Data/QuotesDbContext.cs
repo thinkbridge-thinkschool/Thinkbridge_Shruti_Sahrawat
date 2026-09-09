@@ -50,6 +50,13 @@ public class QuotesDbContext : DbContext
             entity.Property(o => o.Payload).IsRequired();
             entity.Property(o => o.OccurredAt).IsRequired();
 
+            // Day 26. 55 characters is the W3C traceparent's fixed length
+            // (version-traceid-spanid-flags); the length is stated so the
+            // column cannot quietly become nvarchar(max) on SQL Server, and
+            // it is nullable because a row written outside a trace has no
+            // context to record. See OutboxMessage.TraceParent.
+            entity.Property(o => o.TraceParent).HasMaxLength(55);
+
             // Unique, not just indexed. This is what makes QuoteRepository's
             // atomicity argument checkable rather than assumed: a duplicate
             // MessageId can only arrive here if the same event tried to write
