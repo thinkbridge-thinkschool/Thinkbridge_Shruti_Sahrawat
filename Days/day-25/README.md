@@ -318,6 +318,63 @@ failure mode was a prod deployment getting as far as the vault and stopping —
 with SQL and Service Bus already standing, which is exactly the partial-stack
 state Day 24's Finding 4 spent an afternoon on.
 
+### Finding 5 — the vault outlived the teardown, and the name is deterministic
+
+After the stack was torn down and `rg-quotes-dev` was gone, the vault was
+still there:
+
+```
+$ az keyvault list-deleted --query "[?name=='kv-dev-e6oljhc2krrhe']" -o json
+[
+  {
+    "name": "kv-dev-e6oljhc2krrhe",
+    "scheduledPurge": "2026-09-16T04:02:36+00:00"
+  }
+]
+```
+
+Key Vault soft-delete cannot be turned off. Deleting a vault removes it from
+the resource group and from every `az resource list`, but reserves the *name*
+for the retention window — 7 days here, the minimum Azure allows and already
+the shortest this template could ask for.
+
+That reservation is a problem specifically because this stack's names are
+deterministic. `resourceToken` is `uniqueString(subscription().id,
+resourceGroupName, environmentName)`, chosen on Day 23 precisely so that
+re-running the template for the same environment produces the same names
+rather than looking like a brand-new stack to `what-if`. The consequence
+nobody had traced until now: the next `azd provision -Environment dev` asks
+Azure for `kv-dev-e6oljhc2krrhe`, which is exactly the name its own deleted
+predecessor is holding, and the deployment fails on a conflict with itself.
+Every other resource in the stack tolerates reuse of its name; the vault is
+the first that does not.
+
+Fixed with one command, which also confirms the diagnosis:
+
+```
+$ az keyvault purge --name kv-dev-e6oljhc2krrhe --location centralindia
+$ az keyvault list-deleted --query "[?name=='kv-dev-e6oljhc2krrhe'].name" -o tsv
+(empty)
+```
+
+**What has not been established is why the purge did not happen during
+teardown.** Two candidates, and they carry different lessons:
+
+- The teardown ran without `--purge`, in which case the documented command is
+  correct and this is operator error.
+- The teardown ran *with* `--purge` and it did not reach the vault, in which
+  case there is a real gap: with `alpha.deployment.stacks` on, `azd down`
+  delegates deletion to `az stack sub delete`, and azd's own purge step may
+  only cover resources it tracks in its own deployment state rather than
+  resources the stack owns. That would make the teardown instructions in
+  `infra/README.md` incomplete for anyone deploying this stack.
+
+Which of the two applies was not determined, and is recorded as unresolved
+rather than guessed at. The safe operational answer either way is to check
+`az keyvault list-deleted` after tearing this stack down, because the failure
+it prevents does not appear until the *next* deployment, by which time the
+cause is a week behind you.
+
 ## Files
 
 | File | What changed |
@@ -346,7 +403,9 @@ secret is in a vault. The credentials are not hidden; they were never created.
 
 ## GitHub link
 
-<!-- filled in after push -->
+https://github.com/thinkbridge-thinkschool/Thinkbridge_Shruti_Sahrawat/tree/main/Days/day-25
+
+Commit `953b639`.
 
 ## What did you learn this session?
 

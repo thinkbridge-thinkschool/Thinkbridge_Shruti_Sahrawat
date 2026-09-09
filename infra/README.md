@@ -287,3 +287,20 @@ work around; prod's real plan (5 resources, the same
 sharpest single finding across both days - `azd down` reporting success
 while deleting nothing, when no stack yet existed to enumerate, versus
 genuinely tearing down three resources once one did.
+
+## Tearing this stack down
+
+```powershell
+cd infra
+azd down --force --purge
+```
+
+Then check the vault actually went, because soft-delete reserves its name even
+after the resource group is gone, and this stack's names are deterministic -
+so a vault left soft-deleted collides with itself on the next deploy of the
+same environment (Days/day-25, Finding 5):
+
+```powershell
+az keyvault list-deleted --query "[?starts_with(name, 'kv-')].{name:name, purgeOn:properties.scheduledPurgeDate}" -o table
+az keyvault purge --name <name> --location <region>   # if anything is listed
+```
