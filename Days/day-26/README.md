@@ -100,6 +100,17 @@ One trace id. Three processes. Seventeen spans. In time order:
 06:55:49.606  Quotes.Worker   dependency  ServiceBusReceiver.Complete (search) 185.7ms
 ```
 
+![End-to-end transaction details: one trace spanning QuotesApi, Quotes.Outbox and Quotes.Worker](distributed-trace.png)
+
+The same trace in the portal - App Insights -> Search -> end-to-end
+transaction details, `Operation ID: 5e533d0d03d9a5e53210b8fa2f759d54`.
+`OutboxRelay.Publish` hangs under the API's own request because the relay
+restored the parent from the stored `TraceParent`; the two
+`ServiceBusProcessor.ProcessMessage` rows are Day 19's fan-out; the sqlite
+rows under each are the DB leg; the red row at the bottom is the failed IMDS
+probe. Cropped to keep the account identifiers in the portal chrome out of a
+public repository.
+
 Two things in that listing are worth more than the stitch itself.
 
 **The fan-out is visible, to the tick.** Two `ProcessMessage` spans at
@@ -357,6 +368,7 @@ key going into the vault is forty-eight zeroes.
 | [`kql/dependency-breakdown.kql`](kql/dependency-breakdown.kql) | Where time goes, ranked by aggregate cost, with the receive loop excluded (Finding 6). |
 | [`kql/error-rate-alert.kql`](kql/error-rate-alert.kql) | The alert query. Returns rows only on breach; 5xx only. |
 | [`kql/distributed-trace-check.kql`](kql/distributed-trace-check.kql) | Asserts the stitch: traces containing both `QuotesApi` and `Quotes.Worker`. Returns nothing if the outbox drops context again. |
+| [`distributed-trace.png`](distributed-trace.png) | The end-to-end transaction details for that trace, as the portal draws it. |
 | `QuotesApi/Models/OutboxMessage.cs` | `TraceParent`, captured at write time. |
 | `QuotesApi/Data/QuotesDbContext.cs` | The column, 55 chars — the W3C traceparent's fixed length. |
 | `QuotesApi/Middleware/ExceptionHandlingMiddleware.cs` | 400 for malformed requests (Finding 4); exceptions recorded on the span (Finding 5). |
@@ -384,7 +396,8 @@ idempotent and matches both migrations column-for-column.
 
 https://github.com/thinkbridge-thinkschool/Thinkbridge_Shruti_Sahrawat/tree/main/Days/day-26
 
-Commit `24a54f8`.
+Day 26's work landed in commit `24a54f8`; the trace screenshot and later
+corrections followed in subsequent commits.
 
 ## What did you learn this session?
 
