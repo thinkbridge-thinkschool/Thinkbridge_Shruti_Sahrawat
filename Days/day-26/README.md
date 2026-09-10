@@ -401,7 +401,8 @@ corrections followed in subsequent commits.
 
 ## What did you learn this session?
 
-<!-- one line, in your own words -->
+Adding the outbox for reliability quietly broke tracing, and nothing told me.
+Two good patterns can work against each other, and only telemetry shows it.
 
 ## What would break this?
 
