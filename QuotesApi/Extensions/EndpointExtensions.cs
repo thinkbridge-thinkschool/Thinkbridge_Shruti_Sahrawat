@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Asp.Versioning.Builder;
 using Microsoft.AspNetCore.Mvc;
 using QuotesApi.Caching;
 using QuotesApi.Models;
@@ -9,7 +10,9 @@ namespace QuotesApi.Extensions;
 
 public static class EndpointExtensions
 {
-    public static IEndpointRouteBuilder MapQuoteEndpoints(this IEndpointRouteBuilder app)
+    public static IEndpointRouteBuilder MapQuoteEndpoints(
+        this IEndpointRouteBuilder app,
+        ApiVersionSet? versionSet = null)
     {
         // RequireAuthorization on the group, not on each endpoint.
         //
@@ -19,6 +22,11 @@ public static class EndpointExtensions
         // per-endpoint attributes, forgetting leaves it open to the internet -
         // and nothing fails, so nothing tells you.
         var group = app.MapGroup("/api/quotes").WithTags("Quotes").RequireAuthorization();
+
+        if (versionSet is not null)
+        {
+            group.WithApiVersionSet(versionSet);
+        }
 
         group.MapGet("/", async (int page, int size, string? author, ClaimsPrincipal principal, IQuoteRepository repo, CancellationToken ct) =>
         {

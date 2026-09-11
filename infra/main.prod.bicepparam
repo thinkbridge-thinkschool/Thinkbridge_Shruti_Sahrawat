@@ -202,3 +202,14 @@ param apiJwtSigningKey = readEnvironmentVariable('JWT_SIGNING_KEY')
 
 // 90 days, so an incident review in month three still has the logs it needs.
 param logAnalyticsRetentionInDays = 90
+
+// -----------------------------------------------------------------------------
+// Private endpoints (Day 27)
+// -----------------------------------------------------------------------------
+
+// True here too, for the same reason and for one more: prod's Service Bus is
+// Premium, which is the SKU floor for a Service Bus private endpoint at all -
+// dev's Standard namespace cannot have one regardless of this setting, so prod
+// is the only environment that exercises all three private endpoints, not just
+// SQL and Key Vault.
+param enablePrivateEndpoints = true

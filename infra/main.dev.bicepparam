@@ -216,3 +216,14 @@ param apiAspNetCoreEnvironment = 'Production'
 param apiJwtSigningKey = readEnvironmentVariable('JWT_SIGNING_KEY')
 
 param logAnalyticsRetentionInDays = 30
+
+// -----------------------------------------------------------------------------
+// Private endpoints (Day 27)
+// -----------------------------------------------------------------------------
+
+// EnsureCreated bootstraps dev's schema on every fresh deploy (see
+// apiSchemaBootstrap above), so dev is the environment this proof actually
+// runs end to end against a live app - which is also why public access stays
+// on here: the app cannot reach a SQL server or vault it cannot resolve, and
+// it cannot join this VNet (see enablePrivateEndpoints in main.bicep).
+param enablePrivateEndpoints = true

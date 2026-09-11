@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Asp.Versioning.Builder;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using QuotesApi.Configuration;
@@ -19,9 +20,23 @@ namespace QuotesApi.Extensions;
 /// </remarks>
 public static class AuthEndpoints
 {
-    public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder app)
+    public static IEndpointRouteBuilder MapAuthEndpoints(
+        this IEndpointRouteBuilder app,
+        ApiVersionSet? versionSet = null)
     {
         var group = app.MapGroup("/api/auth").WithTags("Auth");
+
+        if (versionSet is not null)
+        {
+            group.WithApiVersionSet(versionSet);
+        }
+
+        // Day 27. The strict limit, on the group rather than on the two
+        // anonymous endpoints individually - same reasoning as
+        // RequireAuthorization above: a sixth endpoint added here is limited
+        // unless somebody deliberately says otherwise. /me is authenticated
+        // and cheap, so including it costs nothing.
+        group.RequireRateLimiting(RateLimitingExtensions.AuthPolicy);
 
         group.MapPost("/register", async (
             RegisterRequest request,
