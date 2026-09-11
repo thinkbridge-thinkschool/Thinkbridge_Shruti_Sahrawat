@@ -23,7 +23,11 @@
         "max-variables": { "level": "error" },
         "no-conflicting-metadata": { "level": "error" },
         "no-deployments-resources": { "level": "error" },
-        "no-hardcoded-env-urls": { "level": "error" },
+        "no-hardcoded-env-urls": {
+          "level": "error",
+          "//": "privatelink.database.windows.net (Day 27) is a fixed Azure Private Link zone name, not a connection endpoint - there is no environment()-derived value for it, and the same domain would be flagged for any subscription in any cloud.",
+          "excludedhosts": ["schema.management.azure.com", "privatelink.database.windows.net"]
+        },
         "no-hardcoded-location": { "level": "error" },
         "no-loc-expr-outside-params": { "level": "error" },
         "no-unnecessary-dependson": { "level": "error" },

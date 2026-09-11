@@ -237,6 +237,38 @@ a real latency cost, named here rather than left to be found on a p99 chart.
 ''')
 param apiLocation string = ''
 
+// -----------------------------------------------------------------------------
+// Private endpoints (Day 27)
+// -----------------------------------------------------------------------------
+
+@description('''
+Builds a VNet, private DNS zones, and private endpoints for SQL, Key Vault and
+- on Premium - Service Bus, and lets infra/scripts/verify-private-dns.ps1 prove
+DNS resolves them privately from inside that VNet. See
+Days/day-27/private-endpoints.md for the full write-up.
+
+Deliberately does not also disable public network access on those resources.
+The API that calls them cannot join this VNet: it runs in a borrowed Container
+Apps managed environment (see existingManagedEnvironmentId above) that this
+stack does not own and that cannot have VNet integration added after the fact,
+and this subscription cannot create a second, VNet-integrated environment
+either (Days/day-24, Finding 7). Turning off public access today would not
+make the data tier private to the app - it would make it unreachable by the
+app. So both paths exist at once: private, for anything that can reach this
+VNet, and public, for the app, until the environment itself can be rebuilt
+with network injection.
+''')
+param enablePrivateEndpoints bool = false
+
+@description('Address space for the private-endpoint VNet. Chosen only to be obviously distinct from anything else in this exercise - there is no VNet peering anywhere in this stack, so the one real requirement is internal consistency.')
+param vnetAddressPrefix string = '10.20.0.0/16'
+
+@description('Subnet the three private endpoints\' NICs land in.')
+param privateEndpointSubnetPrefix string = '10.20.1.0/24'
+
+@description('Subnet for the short-lived container instance that proves DNS resolution. Delegated to Microsoft.ContainerInstance/containerGroups, which is incompatible with also hosting a private endpoint - hence a second subnet rather than one.')
+param verificationSubnetPrefix string = '10.20.2.0/24'
+
 // =============================================================================
 // Resource group
 // =============================================================================
@@ -375,6 +407,70 @@ module api 'modules/api.bicep' = {
   ]
 }
 
+// Private endpoints for the data tier. All conditional on enablePrivateEndpoints
+// so a plain `azd provision` with the default keeps behaving exactly as every
+// earlier day recorded it - this is additive, not a replacement for the public
+// path described in modules/sql.bicep, modules/keyvault.bicep and
+// modules/servicebus.bicep.
+module network 'modules/network.bicep' = if (enablePrivateEndpoints) {
+  scope: rg
+  name: 'network'
+  params: {
+    vnetName: '${namePrefix}-vnet-${environmentName}'
+    location: location
+    tags: defaultTags
+    addressPrefix: vnetAddressPrefix
+    privateEndpointSubnetPrefix: privateEndpointSubnetPrefix
+    verificationSubnetPrefix: verificationSubnetPrefix
+    includeServiceBusZone: serviceBusSku == 'Premium'
+  }
+}
+
+module sqlPrivateEndpoint 'modules/private-endpoint.bicep' = if (enablePrivateEndpoints) {
+  scope: rg
+  name: 'sql-private-endpoint'
+  params: {
+    name: '${resolvedSqlServerName}-pe'
+    location: location
+    tags: defaultTags
+    subnetId: network!.outputs.privateEndpointSubnetId
+    targetResourceId: sql.outputs.serverResourceId
+    groupId: 'sqlServer'
+    privateDnsZoneId: network!.outputs.sqlZoneId
+  }
+}
+
+module keyVaultPrivateEndpoint 'modules/private-endpoint.bicep' = if (enablePrivateEndpoints) {
+  scope: rg
+  name: 'keyvault-private-endpoint'
+  params: {
+    name: '${resolvedKeyVaultName}-pe'
+    location: location
+    tags: defaultTags
+    subnetId: network!.outputs.privateEndpointSubnetId
+    targetResourceId: keyVault.outputs.vaultResourceId
+    groupId: 'vault'
+    privateDnsZoneId: network!.outputs.vaultZoneId
+  }
+}
+
+// Service Bus private endpoints require Premium - Standard does not support
+// them at all, so this only ever creates anything in prod, and only when prod
+// is actually on Premium (see serviceBusSku in the .bicepparam files).
+module serviceBusPrivateEndpoint 'modules/private-endpoint.bicep' = if (enablePrivateEndpoints && serviceBusSku == 'Premium') {
+  scope: rg
+  name: 'servicebus-private-endpoint'
+  params: {
+    name: '${resolvedServiceBusNamespaceName}-pe'
+    location: location
+    tags: defaultTags
+    subnetId: network!.outputs.privateEndpointSubnetId
+    targetResourceId: serviceBus.outputs.namespaceResourceId
+    groupId: 'namespace'
+    privateDnsZoneId: network!.outputs.serviceBusZoneId
+  }
+}
+
 // =============================================================================
 // Outputs - the values the next step needs, so nobody has to go and read them
 // out of the portal.
@@ -403,3 +499,27 @@ output apiOwnsManagedEnvironment bool = api.outputs.ownsManagedEnvironment
 
 @description('Region the container app landed in. Equal to the stack location unless a borrowed environment pinned it elsewhere - which is the only case where these two differ, and worth reading back rather than inferring.')
 output apiDeployedLocation string = resolvedApiLocation
+
+// -----------------------------------------------------------------------------
+// Private endpoints (Day 27) - empty strings when enablePrivateEndpoints is
+// false, rather than omitted, so infra/scripts/verify-private-dns.ps1 can tell
+// "not built this run" apart from "output does not exist yet".
+// -----------------------------------------------------------------------------
+
+output privateEndpointsEnabled bool = enablePrivateEndpoints
+
+@description('Resource ID of the private-endpoint VNet, when built.')
+output privateEndpointVnetId string = enablePrivateEndpoints ? network!.outputs.vnetId : ''
+
+@description('Subnet the verification container instance runs in - see infra/scripts/verify-private-dns.ps1.')
+output privateEndpointVerificationSubnetId string = enablePrivateEndpoints ? network!.outputs.verificationSubnetId : ''
+
+@description('Private IP Azure assigned the SQL server\'s private endpoint. A successful DNS proof means server.database.windows.net resolves to exactly this address from inside the VNet.')
+output sqlPrivateEndpointIp string = enablePrivateEndpoints ? sqlPrivateEndpoint!.outputs.privateIp : ''
+
+@description('Private IP Azure assigned the Key Vault\'s private endpoint.')
+output keyVaultPrivateEndpointIp string = enablePrivateEndpoints ? keyVaultPrivateEndpoint!.outputs.privateIp : ''
+
+@description('Private IP Azure assigned the Service Bus namespace\'s private endpoint. Empty whenever the namespace is Standard, not just when private endpoints are disabled - Standard cannot have one at any setting.')
+output serviceBusPrivateEndpointIp string = (enablePrivateEndpoints && serviceBusSku == 'Premium') ? serviceBusPrivateEndpoint!.outputs.privateIp : ''
+

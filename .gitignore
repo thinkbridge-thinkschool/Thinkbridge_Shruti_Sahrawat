@@ -60,3 +60,9 @@ servicebus-emulator/.env
 # azd provision; infra/main.dev.bicepparam and infra/main.prod.bicepparam
 # are the real, committed sources - this copy is never the thing to edit.
 infra/main.bicepparam
+
+# Day 27 - the ARM template `az bicep build --file main.bicep` emits next to
+# the source. A build artifact: azd compiles the .bicep itself on every
+# provision and never reads this, so a committed copy could only ever be a
+# stale second version of main.bicep.
+infra/main.json

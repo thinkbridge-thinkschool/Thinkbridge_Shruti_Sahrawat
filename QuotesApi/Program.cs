@@ -20,8 +20,47 @@ using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Security.Claims;
+using Microsoft.AspNetCore.HttpOverrides;
+using Asp.Versioning;
+using Asp.Versioning.Builder;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Day 27. Two limits Kestrel applies before a single line of application code
+// runs, which is the only place they are worth applying.
+builder.WebHost.ConfigureKestrel(kestrel =>
+{
+    // The largest legitimate body this API accepts is a quote: 200 characters
+    // of author and 1000 of text, so about 1 KB. The default is 30 MB, which
+    // is 30,000 times more than anything here needs and is read into memory
+    // before validation ever sees it. 64 KB leaves generous room for a
+    // collection payload and still makes a 30 MB POST free to reject.
+    kestrel.Limits.MaxRequestBodySize = 64 * 1024;
+
+    // `Server: Kestrel` tells an attacker what to look up. It tells a
+    // legitimate caller nothing at all.
+    kestrel.AddServerHeader = false;
+});
+
+// Day 27. Whether the demo, profiling, cache and resilience endpoints exist.
+//
+// They are genuinely useful - perf/breaker-timeline.ps1 drives them, the
+// integration suite asserts on the profiling pair, and Days 12, 18, 21 and 22
+// were all demonstrated through them - and they are also, collectively, the
+// worst thing in this application's threat model: anonymous fault injection,
+// an anonymous cache reset, an anonymous deliberately-slow query, and an
+// anonymous endpoint that queues unbounded background work.
+//
+// The resolution is not to delete them but to make them local. The default is
+// "on unless this is Production", which keeps every existing workflow intact:
+// a laptop runs Development, the integration suite runs Testing, and only the
+// deployed container runs Production. The explicit setting exists so the
+// decision can be forced either way without editing code - including forcing
+// them OFF in Development, which is how you check that the rest of the app
+// does not secretly depend on them.
+var diagnosticsEnabled =
+    builder.Configuration.GetValue<bool?>("Diagnostics:Enabled")
+    ?? !builder.Environment.IsProduction();
 
 builder.Host.UseSerilog((context, services, configuration) => configuration
     .ReadFrom.Configuration(context.Configuration)
@@ -141,6 +180,30 @@ builder.Services.AddHttpClient("my-service", client =>
 builder.Services.AddMediatR(cfg =>
     cfg.RegisterServicesFromAssembly(typeof(Program).Assembly));
 builder.Services.AddHealthChecks();
+
+// Day 27. See Extensions/RateLimitingExtensions.cs and ApiSurfaceExtensions.cs.
+builder.Services.AddApiRateLimiting();
+builder.Services.AddQuotesApiVersioning();
+builder.Services.AddQuotesOpenApi();
+
+// Container Apps terminates TLS at its ingress and forwards the original
+// scheme and client address. Without this the app sees every request as HTTP
+// from the ingress's own address, which would make the HSTS header never fire
+// and would collapse every caller into a single rate-limit partition - one
+// noisy client would then throttle everyone.
+//
+// Clearing the known networks and proxies means trusting whatever sends these
+// headers. That is correct here because the ingress is the only route into
+// the container, and it is worth stating plainly rather than leaving as a
+// copied recipe: if this app were ever reachable directly, X-Forwarded-For
+// would become caller-controlled and the rate limiter's partitioning would
+// become caller-controlled with it.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
 builder.Services.AddControllers();
 builder.Services.AddInfrastructure(builder.Configuration, builder.Environment.IsDevelopment());
 builder.Services.AddEndpointsApiExplorer();
@@ -258,9 +321,22 @@ builder.Services.AddScoped<IUserRepository, UserRepository>();
 
 var app = builder.Build();
 
+// Forwarded headers first: everything downstream that asks "was this HTTPS?"
+// or "who is calling?" gets the real answer only after this has run.
+app.UseForwardedHeaders();
+
+// Security headers before anything that can short-circuit, so a 401, a 429 and
+// an unhandled 500 all carry them too. A header only present on the happy path
+// is a header missing exactly when a response is most interesting.
+app.UseSecurityHeaders();
+
 app.UseSerilogRequestLogging();
 app.UseCorrelationId();
 app.UseExceptionHandling();
+
+// Before authentication on purpose: rejecting a flood should not first cost a
+// signature validation and a database lookup.
+app.UseRateLimiter();
 
 // Authentication before authorization, and both before any endpoint runs.
 // Reversed, authorization would run against an anonymous principal that
@@ -318,49 +394,70 @@ using (var scope = app.Services.CreateScope())
 
 app.MapHealthChecks("/health");
 
-// Demo endpoint: forces transient failures so the Polly retry logs are visible.
-app.MapGet("/api/demo/resilience", async (IHttpClientFactory factory, CancellationToken ct) =>
-{
-    var client = factory.CreateClient("my-service");
-    try
-    {
-        var response = await client.GetAsync("http://localhost:9/always-fails", ct);
-        return Results.Ok(new { status = (int)response.StatusCode });
-    }
-    catch (Exception ex)
-    {
-        // Never silently swallowed: the failure is logged and surfaced as 503.
-        Log.Error(ex, "Call to my-service failed after all retries");
-        return Results.Problem(
-            detail: ex.GetType().Name + ": " + ex.Message,
-            statusCode: 503,
-            title: "Downstream call failed after retries");
-    }
-});
-// Demo endpoint: enqueues slow work and returns immediately, proving the
-// request thread never blocks on it. The queued work has nothing real to
-// compute - it just sleeps and logs - so what it demonstrates is the
-// handoff itself, not any particular job.
-app.MapPost("/api/demo/queue-work", async (IBackgroundTaskQueue queue, int delayMs) =>
-{
-    await queue.QueueBackgroundWorkItemAsync(async token =>
-    {
-        Log.Information("Background work item started, will run for {DelayMs}ms", delayMs);
-        await Task.Delay(delayMs, token);
-        Log.Information("Background work item finished");
-    });
+// Day 27. One version set, applied to the two real endpoint groups. Callers
+// that send no version get 1.0, which is every caller that exists today - see
+// Extensions/ApiSurfaceExtensions.cs for why versioning had to be additive.
+var versionSet = app.NewApiVersionSet()
+    .HasApiVersion(new ApiVersion(1, 0))
+    .ReportApiVersions()
+    .Build();
 
-    return Results.Accepted(value: new { queued = true, delayMs });
-});
-app.MapAuthEndpoints();
-app.MapQuoteEndpoints();
-app.MapProfilingEndpoints();
+app.MapAuthEndpoints(versionSet);
+app.MapQuoteEndpoints(versionSet);
 app.MapControllers();
-app.MapCacheDiagnosticsEndpoints();
 
-// Day 22. The stub upstream is the dependency the pipeline calls; the
-// diagnostics endpoints are what perf/breaker-timeline.ps1 drives and reads.
-app.MapUpstreamStubEndpoints();
-app.MapResilienceDiagnosticsEndpoints();
+// Day 27. Everything below exists to demonstrate or diagnose this app, and
+// none of it belongs on a public host. In Production this block does not
+// register, so the routes do not 401 - they 404, because they are not there.
+if (diagnosticsEnabled)
+{
+    // The generated contract is a review artifact, not a runtime feature. It
+    // lists every route including the ones above, so publishing it from a
+    // production host would hand an attacker the map for free.
+    app.MapOpenApi();
+
+    app.MapProfilingEndpoints();
+    app.MapCacheDiagnosticsEndpoints();
+
+    // Day 22. The stub upstream is the dependency the pipeline calls; the
+    // diagnostics endpoints are what perf/breaker-timeline.ps1 drives and reads.
+    app.MapUpstreamStubEndpoints();
+    app.MapResilienceDiagnosticsEndpoints();
+
+    // Demo endpoint: forces transient failures so the Polly retry logs are visible.
+    app.MapGet("/api/demo/resilience", async (IHttpClientFactory factory, CancellationToken ct) =>
+    {
+        var client = factory.CreateClient("my-service");
+        try
+        {
+            var response = await client.GetAsync("http://localhost:9/always-fails", ct);
+            return Results.Ok(new { status = (int)response.StatusCode });
+        }
+        catch (Exception ex)
+        {
+            // Never silently swallowed: the failure is logged and surfaced as 503.
+            Log.Error(ex, "Call to my-service failed after all retries");
+            return Results.Problem(
+                detail: ex.GetType().Name + ": " + ex.Message,
+                statusCode: 503,
+                title: "Downstream call failed after retries");
+        }
+    });
+    // Demo endpoint: enqueues slow work and returns immediately, proving the
+    // request thread never blocks on it. The queued work has nothing real to
+    // compute - it just sleeps and logs - so what it demonstrates is the
+    // handoff itself, not any particular job.
+    app.MapPost("/api/demo/queue-work", async (IBackgroundTaskQueue queue, int delayMs) =>
+    {
+        await queue.QueueBackgroundWorkItemAsync(async token =>
+        {
+            Log.Information("Background work item started, will run for {DelayMs}ms", delayMs);
+            await Task.Delay(delayMs, token);
+            Log.Information("Background work item finished");
+        });
+
+        return Results.Accepted(value: new { queued = true, delayMs });
+    });
+}
 
 app.Run();
