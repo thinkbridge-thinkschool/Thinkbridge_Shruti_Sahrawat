@@ -145,10 +145,16 @@ jobs:
         working-directory: infra
         shell: pwsh
         run: |
-          $scriptArgs = @('-Environment', $env:TARGET, '-ReuseManagedEnvironment')
-          if ($env:PREVIEW -eq 'true') { $scriptArgs += '-Preview' }
-          Write-Host "azd-provision.ps1 $scriptArgs"
-          ./scripts/azd-provision.ps1 @scriptArgs
+          # Splat a HASHTABLE, not an array. Array splatting binds positionally,
+          # so @('-Environment','dev') passes the literal string "-Environment"
+          # as the first positional parameter and ValidateSet rejects it.
+          $p = @{
+            Environment             = $env:TARGET
+            ReuseManagedEnvironment = $true
+          }
+          if ($env:PREVIEW -eq 'true') { $p.Preview = $true }
+          Write-Host "azd-provision.ps1 $($p | ConvertTo-Json -Compress)"
+          ./scripts/azd-provision.ps1 @p
 
       - name: Summary
         if: always()

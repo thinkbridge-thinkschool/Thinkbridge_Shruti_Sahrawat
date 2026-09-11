@@ -111,6 +111,28 @@ foreach ($envName in @('dev','prod')) {
 az role assignment create --assignee $principalId --role Owner --scope "/subscriptions/$sub"
 ```
 
+### The subject string is not what the documentation implies
+
+Azure matches a federated credential's `--subject` as an exact string, and this
+organisation has immutable OIDC subject claims enabled, so GitHub does not
+present `repo:<owner>/<repo>:...`. It presents the owner and repository as
+numeric IDs:
+
+    repo:thinkbridge-thinkschool@285446293/Thinkbridge_Shruti_Sahrawat@1331729223:environment:dev
+
+A credential registered under the plain-name form therefore matches nothing,
+and the first run fails with `AADSTS700213: No matching federated identity
+record found for presented assertion subject '...'`. That error is the fastest
+way to learn the correct string - it quotes verbatim what was presented, so
+create the credential from the error text rather than from the documented
+shape. The commands above use the plain form; add the immutable form too, for
+`environment:dev`, `environment:prod`, `ref:refs/heads/dev` and
+`ref:refs/heads/main`.
+
+Note which of those actually gets used: because the provision job declares
+`environment:`, GitHub presents the *environment* subject, not the branch one.
+The ref credentials are there for a job that does not declare an environment.
+
 Then in GitHub, Settings -> Secrets and variables -> Actions:
 
 | Secret | Value |
