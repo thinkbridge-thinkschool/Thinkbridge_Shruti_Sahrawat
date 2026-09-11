@@ -74,5 +74,21 @@ resource dnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2
 output id string = endpoint.id
 output name string = endpoint.name
 
-@description('The private IP Azure actually assigned, read from the endpoint resource itself rather than assumed from the subnet prefix - Azure hands out the first free address in the subnet, which is not necessarily the fourth one.')
-output privateIp string = endpoint.properties.customDnsConfigs[0].ipAddresses[0]
+// No privateIp output, and that absence is deliberate.
+//
+// The first version of this module ended with:
+//
+//   output privateIp string = endpoint.properties.customDnsConfigs[0].ipAddresses[0]
+//
+// which worked on the deployment that created these endpoints and then failed
+// the *next* deployment of the identical template with
+// DeploymentOutputEvaluationFailed - customDnsConfigs came back empty, so the
+// [0] indexed into nothing and ARM failed the whole deployment at output
+// evaluation, after every resource had been created successfully. The field is
+// not reliably populated, so no output can depend on it.
+//
+// The endpoint's name is deterministic and the caller already knows it, so
+// main.bicep emits names and infra/scripts/verify-private-dns.ps1 resolves the
+// live IP from the endpoint's NIC when it runs. That is better than a
+// deploy-time snapshot anyway: it compares the DNS record against the address
+// the endpoint has *now*.

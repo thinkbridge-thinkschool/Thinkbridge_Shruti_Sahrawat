@@ -110,6 +110,22 @@ Private endpoints to prove, in rg-quotes-dev:
 All private endpoints resolve privately inside .../virtualNetworks/quotes-vnet-dev.
 ```
 
+Re-run after the output fix, against a stack that already existed - which is
+the case that failed before, and the one that matters for anything deployed
+more than once:
+
+```
+=== SQL server - quotes-sql-dev-e6oljhc2krrhe.database.windows.net ===
+  endpoint IP (live, from its NIC): 10.20.1.4
+  PASS: quotes-sql-dev-e6oljhc2krrhe.privatelink.database.windows.net A -> 10.20.1.4
+  PASS: zone is linked to the private-endpoint VNet.
+
+=== Key Vault - kv-dev-e6oljhc2krrhe.vault.azure.net ===
+  endpoint IP (live, from its NIC): 10.20.1.5
+  PASS: kv-dev-e6oljhc2krrhe.privatelink.vaultcore.azure.net A -> 10.20.1.5
+  PASS: zone is linked to the private-endpoint VNet.
+```
+
 ## What went wrong on the way, and what it cost to find
 
 Five failures, none of them in the Bicep, and all five of the same family as
@@ -156,6 +172,38 @@ Day 24's: the template was correct and the *environment around it* was not.
    `--cpu` or `--memory`. Then the pull itself failed with
    `RegistryErrorResponse` from `index.docker.io` - Docker Hub throttling
    anonymous pulls, which is a coin flip rather than a fix.
+
+6. **An output that passed on the deploy that created the resources, and
+   failed on the next deploy of the identical template.** This is the one
+   worth keeping. `modules/private-endpoint.bicep` ended with:
+
+   ```bicep
+   output privateIp string = endpoint.properties.customDnsConfigs[0].ipAddresses[0]
+   ```
+
+   The local deploy that created the endpoints returned that fine. The CI run
+   that re-deployed the same template minutes later failed the whole
+   deployment with `DeploymentOutputEvaluationFailed: Unable to evaluate
+   template outputs: 'privateIp'` - `customDnsConfigs` came back empty that
+   time, so `[0]` indexed into nothing. Every resource had already been
+   created successfully; the deployment failed on the way out, reporting on
+   work that had gone fine.
+
+   Two things follow. A template can be correct and still be
+   non-deterministic, if an output reads a field the resource provider does
+   not always populate - and "it worked when I ran it" is not evidence of
+   the opposite, because the first run is exactly the run most likely to
+   have it populated. And the CI verification step built on Day 24's Finding
+   12, which exists to stop azd's false failures from failing a good
+   deployment, correctly refused to wave this one through: it reported "azd
+   failed and the stack is 'failed'. This is a real failure." A check that
+   only ever forgives is not a check.
+
+   The fix was not a different field. The template now emits the endpoint
+   *names*, which are deterministic, and verify-private-dns.ps1 reads each
+   endpoint's current IP off its NIC when it runs - which is better anyway,
+   since it compares the DNS record against the address the endpoint has now
+   rather than one captured at deploy time.
 
 That last one is why the proof does not depend on a container at all. Three
 things have to be true for a name to resolve privately, and every one of them

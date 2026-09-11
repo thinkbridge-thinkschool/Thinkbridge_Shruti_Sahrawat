@@ -514,12 +514,12 @@ output privateEndpointVnetId string = enablePrivateEndpoints ? network!.outputs.
 @description('Subnet the verification container instance runs in - see infra/scripts/verify-private-dns.ps1.')
 output privateEndpointVerificationSubnetId string = enablePrivateEndpoints ? network!.outputs.verificationSubnetId : ''
 
-@description('Private IP Azure assigned the SQL server\'s private endpoint. A successful DNS proof means server.database.windows.net resolves to exactly this address from inside the VNet.')
-output sqlPrivateEndpointIp string = enablePrivateEndpoints ? sqlPrivateEndpoint!.outputs.privateIp : ''
+@description('Name of the SQL server\'s private endpoint. A name rather than the IP it was given: an output reading customDnsConfigs[0] failed a later deployment of this same template with DeploymentOutputEvaluationFailed when that array came back empty (see modules/private-endpoint.bicep). infra/scripts/verify-private-dns.ps1 resolves the current IP from the endpoint\'s NIC instead.')
+output sqlPrivateEndpointName string = enablePrivateEndpoints ? sqlPrivateEndpoint!.outputs.name : ''
 
-@description('Private IP Azure assigned the Key Vault\'s private endpoint.')
-output keyVaultPrivateEndpointIp string = enablePrivateEndpoints ? keyVaultPrivateEndpoint!.outputs.privateIp : ''
+@description('Name of the Key Vault\'s private endpoint.')
+output keyVaultPrivateEndpointName string = enablePrivateEndpoints ? keyVaultPrivateEndpoint!.outputs.name : ''
 
-@description('Private IP Azure assigned the Service Bus namespace\'s private endpoint. Empty whenever the namespace is Standard, not just when private endpoints are disabled - Standard cannot have one at any setting.')
-output serviceBusPrivateEndpointIp string = (enablePrivateEndpoints && serviceBusSku == 'Premium') ? serviceBusPrivateEndpoint!.outputs.privateIp : ''
+@description('Name of the Service Bus namespace\'s private endpoint. Empty whenever the namespace is Standard, not just when private endpoints are disabled - Standard cannot have one at any setting.')
+output serviceBusPrivateEndpointName string = (enablePrivateEndpoints && serviceBusSku == 'Premium') ? serviceBusPrivateEndpoint!.outputs.name : ''
 

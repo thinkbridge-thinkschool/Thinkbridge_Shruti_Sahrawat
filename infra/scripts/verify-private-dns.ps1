@@ -132,32 +132,54 @@ if ($outputs.privateEndpointsEnabled.value -ne $true) {
 $resourceGroup = $outputs.resourceGroupName.value
 $vnetId = $outputs.privateEndpointVnetId.value
 
+# The endpoint's live IP, read from its NIC rather than from a stack output.
+# A privateIp output on the module failed a later deployment of the identical
+# template with DeploymentOutputEvaluationFailed, because customDnsConfigs came
+# back empty that time - see modules/private-endpoint.bicep. Asking Azure now
+# also means the comparison below is against the address the endpoint actually
+# has, not one captured whenever it was last deployed.
+function Get-EndpointIp {
+    param([string]$ResourceGroup, [string]$EndpointName)
+
+    $nicId = az network private-endpoint show `
+        --resource-group $ResourceGroup --name $EndpointName `
+        --query "networkInterfaces[0].id" -o tsv 2>$null
+    if ([string]::IsNullOrWhiteSpace($nicId)) { return '' }
+
+    return az network nic show --ids $nicId `
+        --query "ipConfigurations[0].privateIPAddress" -o tsv 2>$null
+}
+
 $targets = @(
     [pscustomobject]@{
-        Label      = 'SQL server'
-        Fqdn       = $outputs.sqlServerFqdn.value
-        ExpectedIp = $outputs.sqlPrivateEndpointIp.value
-        Zone       = 'privatelink.database.windows.net'
+        Label        = 'SQL server'
+        Fqdn         = $outputs.sqlServerFqdn.value
+        EndpointName = $outputs.sqlPrivateEndpointName.value
+        Zone         = 'privatelink.database.windows.net'
     }
     [pscustomobject]@{
-        Label      = 'Key Vault'
-        Fqdn       = ([Uri]$outputs.keyVaultUri.value).Host
-        ExpectedIp = $outputs.keyVaultPrivateEndpointIp.value
-        Zone       = 'privatelink.vaultcore.azure.net'
+        Label        = 'Key Vault'
+        Fqdn         = ([Uri]$outputs.keyVaultUri.value).Host
+        EndpointName = $outputs.keyVaultPrivateEndpointName.value
+        Zone         = 'privatelink.vaultcore.azure.net'
     }
 )
-if (-not [string]::IsNullOrWhiteSpace($outputs.serviceBusPrivateEndpointIp.value)) {
+if (-not [string]::IsNullOrWhiteSpace($outputs.serviceBusPrivateEndpointName.value)) {
     $targets += [pscustomobject]@{
-        Label      = 'Service Bus'
-        Fqdn       = $outputs.serviceBusFqdn.value
-        ExpectedIp = $outputs.serviceBusPrivateEndpointIp.value
-        Zone       = 'privatelink.servicebus.windows.net'
+        Label        = 'Service Bus'
+        Fqdn         = $outputs.serviceBusFqdn.value
+        EndpointName = $outputs.serviceBusPrivateEndpointName.value
+        Zone         = 'privatelink.servicebus.windows.net'
     }
+}
+
+foreach ($t in $targets) {
+    $t | Add-Member -NotePropertyName ExpectedIp -NotePropertyValue (Get-EndpointIp -ResourceGroup $resourceGroup -EndpointName $t.EndpointName)
 }
 
 Write-Host ""
 Write-Host "Private endpoints to prove, in ${resourceGroup}:"
-$targets | ForEach-Object { Write-Host "  $($_.Label): $($_.Fqdn) -> expect $($_.ExpectedIp) (zone $($_.Zone))" }
+$targets | ForEach-Object { Write-Host "  $($_.Label): $($_.Fqdn) -> expect $($_.ExpectedIp) (endpoint $($_.EndpointName), zone $($_.Zone))" }
 Write-Host ""
 
 $failed = $false
@@ -166,12 +188,12 @@ foreach ($t in $targets) {
     Write-Host "=== $($t.Label) - $($t.Fqdn) ==="
 
     if ([string]::IsNullOrWhiteSpace($t.ExpectedIp)) {
-        Write-Host "  FAIL: the stack reports no private IP for this endpoint."
+        Write-Host "  FAIL: could not read an IP off private endpoint '$($t.EndpointName)' in $resourceGroup - does it exist?"
         $failed = $true
         Write-Host ""
         continue
     }
-    Write-Host "  endpoint IP (from the stack): $($t.ExpectedIp)"
+    Write-Host "  endpoint IP (live, from its NIC): $($t.ExpectedIp)"
 
     # 2. the zone holds the A record, under the hostname's first label
     $recordName = $t.Fqdn.Split('.')[0]
