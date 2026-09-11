@@ -53,6 +53,34 @@ Application code is not deployed by this workflow - `ci.yml` tests it and
 `deploy-swa.yml` ships the frontend. This one owns infrastructure only, which
 is the same separation `infra/README.md` already describes.
 
+## Why the job does not trust azd's exit code
+
+The first real prod run ended with `ERROR: A referenced resource was not
+found` and `ResourceNotFound: The resource 'azd-stack-prod' was not found`,
+and the job went red. Azure disagreed:
+
+```
+$ az stack sub list -o table
+Name            State      Last Modified
+--------------  ---------  --------------------------------
+azd-stack-prod  succeeded  2026-09-11T06:02:57+00:00
+azd-stack-dev   succeeded  2026-09-11T05:54:04+00:00
+```
+
+The underlying deployment, `azd-stack-prod-260911060vgw8`, finished at
+06:05:54 - after azd had already given up. Prod was deployed correctly the
+whole time. This is the second time azd has reported a completed deployment
+as failed (Days/day-24, Finding 12, where a DNS lookup failed inside its
+polling loop); a deployment stack operation is asynchronous, and azd losing
+sight of one is a different event from that operation failing.
+
+So the job takes its verdict from the resource provider. After azd exits, the
+workflow polls `az stack sub show` for a terminal state and passes only when
+the stack reports `succeeded` *and* was last modified during this run - a
+stale success from an earlier run is still a failure, and so is anything that
+is not `succeeded`. The step logs a warning whenever it overrides azd, so the
+disagreement stays visible rather than being quietly swallowed.
+
 ## Cost
 
 Prod runs Premium Service Bus at roughly rupees 75 per hour - about rupees
@@ -62,6 +90,14 @@ demonstration is finished:
 
 ```powershell
 cd infra
+# azd down COMPILES the template before deleting, so every parameter without a
+# default has to be present just to tear things down. For prod that is
+# JWT_SIGNING_KEY and API_CONTAINER_IMAGE; the values are irrelevant to a
+# deletion, they only have to make bicep build succeed. Omit them and the
+# teardown dies on BCP427 having deleted nothing, while the resources keep
+# billing.
+$env:JWT_SIGNING_KEY     = "teardown-placeholder-nothing-signs-with-this-0000000000"
+$env:API_CONTAINER_IMAGE = "mcr.microsoft.com/k8se/quickstart:latest"
 azd env select prod
 azd down --force --purge
 ```
@@ -69,6 +105,11 @@ azd down --force --purge
 `--purge` matters: without it the Key Vault is soft-deleted, its name stays
 reserved, and the next prod provision collides with it (Day 25 hit exactly
 that).
+
+Then confirm against the resource provider rather than against azd's own
+report - `az stack sub list -o table` and `az group list --query "[].name" -o
+table`. Day 24, Finding 4 is the case where `azd down` announced success in
+five seconds having deleted nothing at all.
 
 ## One-time setup
 
