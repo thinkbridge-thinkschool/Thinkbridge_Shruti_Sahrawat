@@ -141,7 +141,16 @@ jobs:
 
       # pwsh, not powershell: Day 24 Finding 13 is about a machine that has only
       # Windows PowerShell 5.1. GitHub's ubuntu runners ship pwsh 7.
+      # Timestamp before provisioning, so the verification step below can tell
+      # "this run's stack succeeded" from "a stack from an earlier run exists".
+      - name: Mark start time
+        run: echo "STARTED_AT=$(date -u +%s)" >> "$GITHUB_ENV"
+
+      # continue-on-error, because azd's verdict is not Azure's verdict. The
+      # next step asks the resource provider and decides.
       - name: Provision
+        id: provision
+        continue-on-error: true
         working-directory: infra
         shell: pwsh
         run: |
@@ -155,6 +164,53 @@ jobs:
           if ($env:PREVIEW -eq 'true') { $p.Preview = $true }
           Write-Host "azd-provision.ps1 $($p | ConvertTo-Json -Compress)"
           ./scripts/azd-provision.ps1 @p
+
+      # Days/day-24, Finding 12: azd has now twice reported "deployment failed"
+      # for a deployment Azure completed - once when a DNS lookup failed inside
+      # its polling loop, once with ResourceNotFound on the stack it was about
+      # to create. A deployment stack operation is asynchronous; azd losing
+      # sight of it is not the same event as it failing. So the job's verdict
+      # comes from the resource provider, never from the tool that just told us
+      # what it thinks it did.
+      #
+      # This is not a blanket "ignore azd errors": the stack must reach
+      # `succeeded` AND have been modified during this run. A stale success
+      # from an earlier run does not count, and anything else still fails.
+      - name: Confirm against Azure, not against azd
+        shell: bash
+        run: |
+          stack="azd-stack-$TARGET"
+
+          # azd can die before Azure finishes. Wait for a terminal state.
+          for _ in $(seq 1 40); do
+            state=$(az stack sub show --name "$stack" --query provisioningState -o tsv 2>/dev/null || echo missing)
+            case "$state" in succeeded|failed|canceled) break ;; esac
+            sleep 15
+          done
+          modified=$(az stack sub show --name "$stack" --query "systemData.lastModifiedAt" -o tsv 2>/dev/null || echo "")
+          echo "azd outcome : ${{ steps.provision.outcome }}"
+          echo "stack state : $state"
+          echo "stack tstamp: $modified"
+
+          if [ "${{ steps.provision.outcome }}" = "success" ]; then
+            exit 0
+          fi
+
+          if [ "$state" != "succeeded" ]; then
+            echo "::error::azd failed and the stack is '$state'. This is a real failure."
+            exit 1
+          fi
+
+          # Succeeded - but is it *this* run's success?
+          if [ -n "$modified" ]; then
+            m=$(date -u -d "$modified" +%s 2>/dev/null || echo 0)
+            if [ "$m" -lt "$((STARTED_AT - 60))" ]; then
+              echo "::error::azd failed and the stack succeeded BEFORE this run started - that is an older deployment, not this one."
+              exit 1
+            fi
+          fi
+
+          echo "::warning::azd reported a failure, but $stack reports 'succeeded' and was modified during this run. Treating the deployment as successful - see Days/day-24 Finding 12."
 
       - name: Summary
         if: always()
