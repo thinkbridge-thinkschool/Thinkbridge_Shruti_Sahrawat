@@ -1,0 +1,174 @@
+# Day 24's deployment stack, promoted the way the exercise describes: a push to
+# `dev` provisions dev, and merging to `main` provisions prod behind a manual
+# approval.
+#
+# Path-filtered to infra/** deliberately. A README commit must never stand up a
+# Premium Service Bus namespace, and an automated deploy is a standing risk to
+# the live app in rg-thinkschool-dev2 whose managed environment this stack
+# borrows (Days/day-24, Findings 7 and 8). Narrow trigger, manual gate on prod.
+#
+# Requires repo secrets AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_SUBSCRIPTION_ID
+# (federated, no passwords), JWT_SIGNING_KEY, SQL_AAD_ADMIN_LOGIN,
+# SQL_AAD_ADMIN_OBJECT_ID; and repo variables AZURE_LOCATION,
+# API_CONTAINER_IMAGE, SQL_AAD_ADMIN_PRINCIPAL_TYPE. See docs/promotion-flow.md.
+name: deploy-infra
+
+on:
+  push:
+    branches: [dev, main]
+    paths:
+      - 'infra/**'
+      - '.github/workflows/deploy-infra.yml'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Environment to provision
+        type: choice
+        options: [dev, prod]
+        default: dev
+      preview:
+        description: Plan only - creates nothing
+        type: boolean
+        default: true
+
+permissions:
+  id-token: write      # OIDC federated sign-in. No client secret anywhere.
+  contents: read
+
+# Never let two provisions of the same environment overlap. They would fight
+# over the same deployment stack.
+concurrency:
+  group: deploy-infra-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      target: ${{ steps.pick.outputs.target }}
+      preview: ${{ steps.pick.outputs.preview }}
+    steps:
+      - id: pick
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            target="${{ inputs.target }}"
+            preview="${{ inputs.preview }}"
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            target="prod"; preview="false"
+          else
+            target="dev"; preview="false"
+          fi
+          echo "target=$target"   >> "$GITHUB_OUTPUT"
+          echo "preview=$preview" >> "$GITHUB_OUTPUT"
+          echo "Resolved target=$target preview=$preview"
+
+  provision:
+    needs: resolve
+    runs-on: ubuntu-latest
+    # Give the `prod` environment required reviewers in
+    # Settings -> Environments. That approval is the only thing standing
+    # between a merge and an hourly Premium Service Bus bill.
+    environment: ${{ needs.resolve.outputs.target }}
+    env:
+      TARGET: ${{ needs.resolve.outputs.target }}
+      PREVIEW: ${{ needs.resolve.outputs.preview }}
+      # Read by main.<env>.bicepparam through readEnvironmentVariable, so these
+      # have to be process environment variables, not only azd ones.
+      AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+      JWT_SIGNING_KEY: ${{ secrets.JWT_SIGNING_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install azd
+        uses: Azure/setup-azd@v2
+
+      # Deployment stacks are still alpha in azd and the flag is per-machine,
+      # so a fresh runner has it OFF. Without this line azd reads the whole
+      # deploymentStacks block in azure.yaml, ignores it in silence, and
+      # deploys the plain way - no stack, no receipt, no clean teardown. That
+      # exact silent downgrade is Days/day-24, Finding 10.
+      - name: Enable deployment stacks
+        run: |
+          azd config set alpha.deployment.stacks on
+          azd config list-alpha
+
+      # Two sign-ins, both federated: the Azure CLI because
+      # azd-provision.ps1 calls `az containerapp env list` to find the managed
+      # environment to borrow, and azd for the provision itself.
+      - name: Sign in to Azure CLI (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign in to azd (OIDC)
+        run: |
+          azd auth login \
+            --client-id "${{ secrets.AZURE_CLIENT_ID }}" \
+            --tenant-id "${{ secrets.AZURE_TENANT_ID }}" \
+            --federated-credential-provider github
+
+      # .azure/ is gitignored, so every runner starts with no azd environment.
+      - name: Create the azd environment
+        working-directory: infra
+        run: |
+          azd env new "$TARGET" \
+            --location "$AZURE_LOCATION" \
+            --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            --no-prompt
+
+      - name: Set the parameters main.$TARGET.bicepparam reads
+        working-directory: infra
+        run: |
+          azd env set SQL_AAD_ADMIN_LOGIN     "${{ secrets.SQL_AAD_ADMIN_LOGIN }}"
+          azd env set SQL_AAD_ADMIN_OBJECT_ID "${{ secrets.SQL_AAD_ADMIN_OBJECT_ID }}"
+
+          # Every `if -n` below matters: setting one of these to an empty string
+          # overrides the bicepparam's own default with nothing, which is not
+          # the same as leaving it unset.
+          if [ -n "${{ vars.API_CONTAINER_IMAGE }}" ]; then
+            azd env set API_CONTAINER_IMAGE "${{ vars.API_CONTAINER_IMAGE }}"
+          fi
+          if [ -n "${{ vars.ACR_LOGIN_SERVER }}" ]; then
+            azd env set ACR_LOGIN_SERVER "${{ vars.ACR_LOGIN_SERVER }}"
+            azd env set ACR_RESOURCE_ID  "${{ vars.ACR_RESOURCE_ID }}"
+          fi
+          if [ "$TARGET" = "prod" ] && [ -n "${{ vars.SQL_AAD_ADMIN_PRINCIPAL_TYPE }}" ]; then
+            azd env set SQL_AAD_ADMIN_PRINCIPAL_TYPE "${{ vars.SQL_AAD_ADMIN_PRINCIPAL_TYPE }}"
+          fi
+
+      # pwsh, not powershell: Day 24 Finding 13 is about a machine that has only
+      # Windows PowerShell 5.1. GitHub's ubuntu runners ship pwsh 7.
+      - name: Provision
+        working-directory: infra
+        shell: pwsh
+        run: |
+          # Splat a HASHTABLE, not an array. Array splatting binds positionally,
+          # so @('-Environment','dev') passes the literal string "-Environment"
+          # as the first positional parameter and ValidateSet rejects it.
+          $p = @{
+            Environment             = $env:TARGET
+            ReuseManagedEnvironment = $true
+          }
+          if ($env:PREVIEW -eq 'true') { $p.Preview = $true }
+          Write-Host "azd-provision.ps1 $($p | ConvertTo-Json -Compress)"
+          ./scripts/azd-provision.ps1 @p
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### deploy-infra"
+            echo ""
+            echo "- environment: \`$TARGET\`"
+            echo "- preview only: \`$PREVIEW\`"
+            echo "- triggered by: \`${{ github.event_name }}\` on \`${{ github.ref_name }}\`"
+            echo ""
+            if [ "$TARGET" = "prod" ] && [ "$PREVIEW" != "true" ]; then
+              echo "> Prod bills hourly. Tear it down when the demo is over:"
+              echo "> \`cd infra; ./scripts/azd-provision.ps1\` is the way up;"
+              echo "> \`azd env select prod; azd down --force --purge\` is the way back."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
