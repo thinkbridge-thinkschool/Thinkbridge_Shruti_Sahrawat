@@ -392,6 +392,86 @@ it (Days 20 and 24 Finding 17). Deploying without it makes every
 `POST /api/quotes` fail on `Invalid column name 'TraceParent'`. The script is
 idempotent and matches both migrations column-for-column.
 
+## What the subscription migration broke, and why nothing noticed
+
+This day's whole argument is that an application running without tracing is
+indistinguishable from one tracing correctly. It then demonstrated the point at
+its own expense.
+
+The Application Insights resource was never in a template. It was created by
+hand in the old subscription, and `Program.cs` read a connection string that no
+Bicep file ever set. Everything worked, so nothing recorded the gap. When the
+deployment moved to a new subscription, the resource did not come with it - and
+the application kept starting, kept serving traffic, kept passing its health
+probe, and emitted nothing at all. An audit of the new subscription found:
+
+- no `microsoft.insights/components` resource anywhere in the subscription
+- no alert rules - the error-rate alert was gone with it
+- no `APPLICATIONINSIGHTS_CONNECTION_STRING` on the container app
+
+Three independent confirmations of a failure with no symptom.
+
+### The fix that would have been wrong
+
+`az containerapp update --set-env-vars APPLICATIONINSIGHTS_CONNECTION_STRING=...`
+takes about ten seconds and restores telemetry immediately. It is also the
+wrong fix twice over. The container app is managed by the deployment stack, so
+the next `azd provision` would strip the variable back out and restore the
+silence - and the state it restored would be the one nobody can see. Fixing an
+invisible failure with a change that silently reverts reproduces the original
+bug with an extra step.
+
+### What was added
+
+- `infra/modules/monitoring.bicep` - workspace-based Application Insights
+  (classic components were retired in February 2024) with its own Log Analytics
+  workspace, plus the error-rate alert from `kql/error-rate-alert.kql` as a
+  scheduled query rule. Its own workspace rather than the one `api.bicep`
+  creates, because that one is conditional on the stack owning its managed
+  environment - false for every environment in this subscription, which would
+  make telemetry present or absent depending on a flag about something else.
+- `api.bicep` takes the component *name* and reads the connection string from
+  an `existing` resource. A module output is written to the deployment history
+  in plaintext and readable by anyone with subscription read access, and the
+  connection string carries the instrumentation key.
+- The alert takes no action group by default, so no real email address is
+  committed to this repository.
+
+The resource is now created by the same deployment that creates the application
+reading from it. "Deployed" and "instrumented" are no longer states that can
+drift apart, and an environment without Application Insights would fail a
+provision rather than pass one quietly.
+
+### Verified in the new subscription
+
+```
+REQUESTS       GET /health               145   p50 0.34ms    p99 80.50ms
+               GET /api/quotes/           34   p50 0.77ms    p99 467.70ms
+               GET /api/quotes/{id:int}    2   p50 36.67ms   p99 111.51ms
+               POST /api/quotes/           1   p50 502.23ms
+
+DEPENDENCIES   SQL -> quotes-sql-dev-...database.windows.net | quotesdb   p95 ~32ms
+
+TRACE STITCH   GET /api/quotes/{id:int} -> SQL   2 spans, shared OperationId
+
+ALERT          quotes-error-rate-dev   enabled, severity 2, 5m window / 5m frequency
+```
+
+Two things worth noting in that output. The dependency and trace rows were
+empty on the first attempt, and correctly so: `/health` does not touch the
+database (hence the 0.34ms p50) and the `/api/quotes` requests were 401s
+rejected at the auth middleware before reaching the data layer. No database
+call means no dependency span and nothing to stitch a trace to. Telemetry that
+proves tracing works has to come from a request that actually does something.
+
+Second, the queries above use `AppRequests` and `AppDependencies`, while the
+`.kql` files in this folder use `requests` and `dependencies`. Both are
+correct. Workspace-based Application Insights stores telemetry under the `App*`
+table names; the App Insights Logs blade and component-scoped queries - which
+is what the alert rule uses - map the classic names onto them. Querying the
+workspace directly does not. That distinction cost an hour of believing
+telemetry was missing when it had been arriving all along.
+
 ## GitHub link
 
 https://github.com/thinkbridge-thinkschool/Thinkbridge_Shruti_Sahrawat/tree/main/Days/day-26
