@@ -141,12 +141,29 @@ read its key.
 ''')
 param keyVaultIdentityResourceId string
 
+@description('''
+Name of the Application Insights component in this resource group.
+
+Passed as a name rather than a connection string on purpose. The connection
+string carries the instrumentation key, and a module output is written to the
+deployment history in plaintext, readable by anyone with subscription read
+access. Looking the component up as an `existing` resource keeps the value on
+the path between ARM and the container app and out of every record in between.
+''')
+param appInsightsName string
+
 @description('Port the container listens on. 8080 is what QuotesApi\'s Dockerfile exposes.')
 param targetPort int = 8080
 
 // Exactly the shape azure.yaml already uses in the deployed app, reproduced here
 // so this template describes the running system rather than a tidier one.
 var sqlConnectionString = 'Server=tcp:${sqlServerFqdn},1433;Database=${sqlDatabaseName};Authentication=Active Directory Managed Identity;User Id=${identityClientId};Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;'
+
+// Not created here - modules/monitoring.bicep owns it. Declared `existing`
+// only to read the connection string below.
+resource appInsights 'Microsoft.Insights/components@2020-02-02' existing = {
+  name: appInsightsName
+}
 
 var baseEnv = [
   {
@@ -185,6 +202,16 @@ var baseEnv = [
     // runtime, not at deploy time.
     name: 'AZURE_CLIENT_ID'
     value: identityClientId
+  }
+  {
+    // The Azure Monitor exporter reads this and, when it is absent, exports
+    // nothing - without logging, without failing, without degrading anything a
+    // health check would notice. That is how Day 26's tracing vanished the
+    // moment the subscription changed: the app was fine, and only the
+    // telemetry was gone. Sourced from the component this same stack creates,
+    // so "deployed" and "instrumented" stop being separable states.
+    name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+    value: appInsights.properties.ConnectionString
   }
 ]
 
