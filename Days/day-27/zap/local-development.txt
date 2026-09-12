@@ -1,0 +1,41 @@
+NOTE: this run intended ASPNETCORE_ENVIRONMENT=Production but `dotnet run`
+applied launchSettings.json, whose profile sets Development and overrides the
+shell variable. So this is the DEVELOPMENT surface - every diagnostic endpoint
+present, which is correct for that environment. The Production run is in
+deployed-production.txt. Kept because the pair is the actual evidence that the
+gate works.
+
+﻿Probed: http://localhost:5067
+At:     2026-09-11 11:51:48Z
+
+
+Path                             Status Gated Verdict       
+----                             ------ ----- -------       
+/health                             200 False OK (200)      
+/api/auth/login                     405 False OK (405)      
+/api/quotes                         401 False OK (401)      
+/openapi/v1.json                    200  True EXPOSED (200) 
+/api/demo/resilience                503  True EXPOSED (503) 
+/api/demo/queue-work?delayMs=1      405  True EXPOSED (405) 
+/api/profiling/author-stats-fast    200  True EXPOSED (200) 
+/api/profiling/author-stats-slow    200  True EXPOSED (200) 
+/api/cache/reset                    405  True EXPOSED (405) 
+/api/upstream/reset                 405  True EXPOSED (405) 
+/api/resilience/state               404  True OK (gated off)
+
+
+
+Security headers on /health:
+
+Header                       Present       Value                                     
+------                       -------       -----                                     
+X-Content-Type-Options       yes           nosniff                                   
+X-Frame-Options              yes           DENY                                      
+Content-Security-Policy      yes           default-src 'none'; frame-ancestors 'none'
+Referrer-Policy              yes           no-referrer                               
+Cross-Origin-Resource-Policy yes           same-origin                               
+Strict-Transport-Security    NO                                                      
+Server                       absent (good)                                           
+
+
+

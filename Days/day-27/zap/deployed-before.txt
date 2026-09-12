@@ -1,0 +1,34 @@
+﻿Probed: https://quotes-api-dev.blacksand-b575aaa0.southindia.azurecontainerapps.io
+At:     2026-09-11 11:24:20Z
+
+
+Path                             Status                            Gated Verdict    
+----                             ------                            ----- -------    
+/health                          ERR: The operation has timed out. False UNREACHABLE
+/api/auth/login                  ERR: The operation has timed out. False UNREACHABLE
+/api/quotes                      ERR: The operation has timed out. False UNREACHABLE
+/openapi/v1.json                 ERR: The operation has timed out.  True UNREACHABLE
+/api/demo/resilience             ERR: The operation has timed out.  True UNREACHABLE
+/api/demo/queue-work?delayMs=1   ERR: The operation has timed out.  True UNREACHABLE
+/api/profiling/author-stats-fast ERR: The operation has timed out.  True UNREACHABLE
+/api/profiling/author-stats-slow ERR: The operation has timed out.  True UNREACHABLE
+/api/cache/reset                 ERR: The operation has timed out.  True UNREACHABLE
+/api/upstream/reset              ERR: The operation has timed out.  True UNREACHABLE
+/api/resilience/state            ERR: The operation has timed out.  True UNREACHABLE
+
+
+
+Security headers on /health:
+
+Header                       Present       Value
+------                       -------       -----
+X-Content-Type-Options       NO                 
+X-Frame-Options              NO                 
+Content-Security-Policy      NO                 
+Referrer-Policy              NO                 
+Cross-Origin-Resource-Policy NO                 
+Strict-Transport-Security    NO                 
+Server                       absent (good)      
+
+
+
