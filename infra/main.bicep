@@ -73,17 +73,34 @@ var resolvedServiceBusNamespaceName = empty(serviceBusNamespaceName) ? '${namePr
 // provides uniqueness in every one of these names anyway.
 var resolvedKeyVaultName = empty(keyVaultName) ? 'kv-${environmentName}-${resourceToken}' : keyVaultName
 
-// The container app's region: the stack's, unless a borrowed environment pins
-// it somewhere else.
+// The container app's region: the stack's, unless apiLocation says otherwise.
 //
-// Deliberately ignored when this stack creates its own environment, even if
-// apiLocation is set. The api module uses one `location` for the app, the
-// managed environment and the workspace, so honouring apiLocation on the
-// owned path would silently move all three - which is not what the parameter
-// says it does, and would make a value left over from a previous borrowed run
-// relocate a whole environment. Borrowing is the only case where the app's
-// region is not the stack's, so it is the only case where this applies.
-var resolvedApiLocation = (empty(apiLocation) || empty(existingManagedEnvironmentId)) ? location : apiLocation
+// This used to be honoured *only* when a borrowed environment pinned the app
+// somewhere else, and ignored whenever the stack created its own environment.
+// The reasoning was sound - the api module uses one `location` for the app,
+// the managed environment and the workspace, so honouring apiLocation on the
+// owned path moves all three, and a value left over from a previous borrowed
+// run could relocate a whole environment without anyone asking for it.
+//
+// It stopped being the right trade the first time a subscription refused to
+// host a managed environment in the stack's region at all. Azure for Students
+// answers `MaxNumberOfEnvironmentsInSubExceeded` for Central India with zero
+// environments in existence, and its region policy allows only centralindia,
+// eastasia, koreacentral, indiasouthcentral and uaenorth - so the data tier
+// must stay in Central India (SQL, Key Vault and Service Bus all deploy there
+// happily) while the app and its environment go to UAE North. With the old
+// guard there was no way to express that: the only lever was `location`, and
+// moving that moves the database too.
+//
+// So apiLocation now means what its description says in both cases, and on
+// the owned path it moves the app, its managed environment and its Log
+// Analytics workspace together - which is the only coherent thing it could
+// mean, since a container app must live in its environment's region. The data
+// tier stays at `location`. That cross-region hop is real and is the same one
+// Days 23-24 measured, arrived at from the opposite direction: there the
+// environment was fixed and the database had to move, here the database is
+// fixed and the environment has to.
+var resolvedApiLocation = empty(apiLocation) ? location : apiLocation
 
 // -----------------------------------------------------------------------------
 // SQL
@@ -222,10 +239,11 @@ modules/api.bicep.
 param existingManagedEnvironmentId string = ''
 
 @description('''
-Region for the container app, when it differs from the stack's. Read only
-when existingManagedEnvironmentId is set, and ignored otherwise - an app that
-lives in an environment this stack created is always in the stack's region by
-construction.
+Region for the container app, when it differs from the stack's. Honoured on
+both paths: with a borrowed environment it names the region that environment
+already sits in, and when this stack creates its own it moves the app, the
+managed environment and the Log Analytics workspace there together. The data
+tier always stays at `location`.
 
 It exists because a container app must sit in its environment's region, and a
 borrowed environment's region is not this stack's to choose: the existing

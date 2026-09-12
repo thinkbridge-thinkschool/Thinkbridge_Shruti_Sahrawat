@@ -1,0 +1,34 @@
+﻿Probed: https://quotes-api-dev.redfield-acdee432.uaenorth.azurecontainerapps.io
+At:     2026-09-12 14:53:43Z
+
+
+Path                             Status Gated Verdict       
+----                             ------ ----- -------       
+/health                             200 False OK (200)      
+/api/auth/login                     405 False OK (405)      
+/api/quotes                         401 False OK (401)      
+/openapi/v1.json                    404  True OK (gated off)
+/api/demo/resilience                404  True OK (gated off)
+/api/profiling/author-stats-fast    404  True OK (gated off)
+/api/profiling/author-stats-slow    404  True OK (gated off)
+/api/cache/stats                    404  True OK (gated off)
+/api/upstream/status                404  True OK (gated off)
+/api/upstream/state                 404  True OK (gated off)
+/api/resilience/stats               404  True OK (gated off)
+
+
+
+Security headers on /health:
+
+Header                       Present       Value                                     
+------                       -------       -----                                     
+X-Content-Type-Options       yes           nosniff                                   
+X-Frame-Options              yes           DENY                                      
+Content-Security-Policy      yes           default-src 'none'; frame-ancestors 'none'
+Referrer-Policy              yes           no-referrer                               
+Cross-Origin-Resource-Policy yes           same-origin                               
+Strict-Transport-Security    yes           max-age=31536000; includeSubDomains       
+Server                       absent (good)                                           
+
+
+

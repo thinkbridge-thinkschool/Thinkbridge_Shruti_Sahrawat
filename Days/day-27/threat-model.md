@@ -103,6 +103,54 @@ get hosted.
    so the surface is reviewable and can change without breaking callers.
 5. A VNet, private DNS zones, and private endpoints for SQL, Key Vault and (on Premium) Service Bus - real resources, proven by DNS resolution from inside the VNet, alongside the public endpoint rather than instead of it. See Days/day-27/private-endpoints.md for why closing the public side isn't possible yet.
 
+## Verified against a real Production deployment
+
+The diagnostics gate is the largest single claim on this page, and for a day
+it rested on reading a config expression. It is now observed. Days/day-27/zap
+/probe-surface.ps1 asks each endpoint directly, and the same binary answers
+differently depending only on ASPNETCORE_ENVIRONMENT:
+
+| Path | Development (local) | Production (deployed) |
+|---|---|---|
+| `/health` | 200 | 200 |
+| `/api/auth/login` | 405 (POST-only route present) | 405 |
+| `/api/quotes` | 401 (authorisation working) | 401 |
+| `/openapi/v1.json` | 200 | **404** |
+| `/api/demo/resilience` | 503 (deliberate fault) | **404** |
+| `/api/profiling/author-stats-fast` | 200 | **404** |
+| `/api/profiling/author-stats-slow` | 200 | **404** |
+| `/api/cache/stats` | 200 | **404** |
+| `/api/upstream/status` | 200 | **404** |
+| `/api/upstream/state` | 200 | **404** |
+| `/api/resilience/stats` | 200 | **404** |
+
+Security headers on the deployed app, all present and correct:
+
+```
+X-Content-Type-Options        nosniff
+X-Frame-Options               DENY
+Content-Security-Policy       default-src 'none'; frame-ancestors 'none'
+Referrer-Policy               no-referrer
+Cross-Origin-Resource-Policy  same-origin
+Strict-Transport-Security     max-age=31536000; includeSubDomains
+Server                        absent
+```
+
+HSTS appears here and is correctly absent locally: the middleware only sets it
+when `Request.IsHttps`, which is true behind Container Apps' TLS ingress
+because `UseForwardedHeaders` is in front of it, and false over plain HTTP on
+localhost. Two different results from one line of code, both right.
+
+Worth recording how this evidence was finally obtained, because it says
+something about test design. The first attempt ran the app locally with
+`ASPNETCORE_ENVIRONMENT=Production` set in the shell and reported every
+diagnostic endpoint still exposed - which looked like the gate failing. It was
+not: `dotnet run` applies `launchSettings.json`, whose profile sets
+`ASPNETCORE_ENVIRONMENT=Development` and overrides the shell variable. The
+probe was measuring a Development instance and saying so accurately. A test
+that is wrong about what it is testing reports a failure that looks exactly
+like the real thing.
+
 ## Accepted, and why
 
 - **The app tier cannot join the VNet.** Container Apps can only reach a

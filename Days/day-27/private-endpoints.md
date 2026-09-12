@@ -126,6 +126,42 @@ more than once:
   PASS: zone is linked to the private-endpoint VNet.
 ```
 
+### Prod, through the pipeline - all three endpoints
+
+Dev can only ever prove two of the three: its Service Bus namespace is
+Standard, and Standard does not support private endpoints at any setting.
+Prod is Premium, so it is the only environment where the whole data tier can
+be proven. It was deployed by merging to main and letting the Day 26
+promotion pipeline run it (`deploy-infra` #8, commit 91fde38), not by hand:
+
+```
+Private endpoints to prove, in rg-quotes-prod:
+  SQL server:  quotes-sql-prod-zcebapajgws7q.database.windows.net -> expect 10.20.1.4
+  Key Vault:   kv-prod-zcebapajgws7q.vault.azure.net               -> expect 10.20.1.5
+  Service Bus: quotes-sb-prod-zcebapajgws7q.servicebus.windows.net -> expect 10.20.1.6
+
+=== SQL server ===
+  endpoint IP (live, from its NIC): 10.20.1.4
+  PASS: quotes-sql-prod-zcebapajgws7q.privatelink.database.windows.net A -> 10.20.1.4
+  PASS: zone is linked to the private-endpoint VNet.
+
+=== Key Vault ===
+  endpoint IP (live, from its NIC): 10.20.1.5
+  PASS: kv-prod-zcebapajgws7q.privatelink.vaultcore.azure.net A -> 10.20.1.5
+  PASS: zone is linked to the private-endpoint VNet.
+
+=== Service Bus ===
+  endpoint IP (live, from its NIC): 10.20.1.6
+  PASS: quotes-sb-prod-zcebapajgws7q.privatelink.servicebus.windows.net A -> 10.20.1.6
+  PASS: zone is linked to the private-endpoint VNet.
+
+All private endpoints resolve privately inside .../virtualNetworks/quotes-vnet-prod.
+```
+
+Six assertions, six passes, and the same template ran unchanged in both
+environments - the only difference is the SKU condition that decides whether
+the Service Bus endpoint exists at all.
+
 ## What went wrong on the way, and what it cost to find
 
 Five failures, none of them in the Bicep, and all five of the same family as
