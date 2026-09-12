@@ -157,20 +157,32 @@ param apiCpu = '1.0'
 param apiMemory = '2Gi'
 param apiConcurrentRequests = 100
 
-// Left as Migrate, deliberately, even though dev has had to retreat to
-// EnsureCreated (see main.dev.bicepparam). Prod must not use EnsureCreated:
-// it writes no __EFMigrationsHistory, so the first production database
-// created that way can never be migrated afterwards without being dropped -
-// which is a one-way door to put in front of real data.
+// EnsureCreated, and this is a retreat from a previous position that is worth
+// recording rather than quietly overwriting.
 //
-// The practical consequence is that prod is not deployable today, and that is
-// the honest state rather than a hidden one: the repo has only SQLite
-// migrations (Days/day-24, Finding 17), so Migrate throws
-// PendingModelChangesWarning against Azure SQL. Prod stays blocked on the
-// application fix - a provider-specific SQL Server migration set - instead of
-// being made to look deployable by choosing a bootstrap mode no production
-// database should use.
-param apiSchemaBootstrap = 'Migrate'
+// This file used to say Migrate, on the grounds that prod must never use
+// EnsureCreated: it writes no __EFMigrationsHistory, so a production database
+// created that way can never be migrated afterwards without being dropped -
+// a one-way door to put in front of real data. That reasoning is still
+// correct, and it still applies to any prod that holds anything.
+//
+// It does not apply to the prod this parameter file currently describes.
+// Because the repo has only SQLite migrations (Days/day-24, Finding 17),
+// Migrate throws PendingModelChangesWarning against Azure SQL, so prod was not
+// deployable at all - which left Day 24's "deploy to dev, then promote to
+// prod" unfinished, and Day 27's prod private endpoints unverified, on a
+// subscription whose Premium Service Bus makes a long-lived prod unaffordable
+// anyway. The prod this deploys is an evidence deployment: stood up, verified,
+// and torn down inside an hour, holding no data that outlives it. The one-way
+// door only matters if someone walks through it, and nothing here does.
+//
+// So this is a scoped concession, not a reversal. The moment prod is meant to
+// persist, this goes back to Migrate and the application supplies a
+// provider-specific SQL Server migration set - the fix the old comment named,
+// which is still the fix. Until then, deploying prod with EnsureCreated and
+// saying so beats a prod that cannot be deployed and a promotion step that has
+// never once run end to end.
+param apiSchemaBootstrap = 'EnsureCreated'
 param apiAspNetCoreEnvironment = 'Production'
 
 // Required, no default. This template forces ASPNETCORE_ENVIRONMENT=Production
