@@ -72,6 +72,11 @@ var resolvedServiceBusNamespaceName = empty(serviceBusNamespaceName) ? '${namePr
 // keeps it at 20-21 and still globally unique, since the token is what
 // provides uniqueness in every one of these names anyway.
 var resolvedKeyVaultName = empty(keyVaultName) ? 'kv-${environmentName}-${resourceToken}' : keyVaultName
+// No resourceToken. Application Insights names only have to be unique inside
+// their resource group, and a readable name is worth more in a Logs blade than
+// a globally unique one - unlike sql, servicebus and keyvault above, whose
+// names are DNS labels.
+var resolvedAppInsightsName = empty(appInsightsName) ? '${namePrefix}-appi-${environmentName}' : appInsightsName
 
 // The container app's region: the stack's, unless apiLocation says otherwise.
 //
@@ -224,6 +229,15 @@ param keyVaultEnablePurgeProtection bool = false
 @minValue(30)
 @maxValue(730)
 param logAnalyticsRetentionInDays int
+
+@description('Name of the Application Insights component. Derived from namePrefix and environmentName when empty.')
+param appInsightsName string = ''
+
+@description('Action groups for the error-rate alert. Empty by default so that no real email address is committed to this repository; attach one in the portal or pass it here.')
+param alertActionGroupIds array = []
+
+@description('Set false to deploy Application Insights without Day 26\'s error-rate alert.')
+param enableErrorRateAlert bool = true
 
 @description('''
 Resource ID of a Container Apps managed environment that already exists, to
@@ -379,6 +393,21 @@ module registryAccess 'modules/registry-access.bicep' = if (!empty(containerRegi
   }
 }
 
+module monitoring 'modules/monitoring.bicep' = {
+  scope: rg
+  name: 'monitoring'
+  params: {
+    name: resolvedAppInsightsName
+    workspaceName: '${namePrefix}-appi-logs-${environmentName}'
+    location: location
+    tags: defaultTags
+    retentionInDays: logAnalyticsRetentionInDays
+    alertName: '${namePrefix}-error-rate-${environmentName}'
+    alertActionGroupIds: alertActionGroupIds
+    alertEnabled: enableErrorRateAlert
+  }
+}
+
 module api 'modules/api.bicep' = {
   scope: rg
   name: 'api'
@@ -406,6 +435,7 @@ module api 'modules/api.bicep' = {
     aspNetCoreEnvironment: apiAspNetCoreEnvironment
     jwtSecretUri: keyVault.outputs.jwtSecretUri
     keyVaultIdentityResourceId: identity.outputs.resourceId
+    appInsightsName: monitoring.outputs.componentName
   }
   dependsOn: [
     registryAccess
@@ -498,6 +528,7 @@ output resourceGroupName string = rg.name
 output apiFqdn string = api.outputs.fqdn
 output apiHealthUrl string = 'https://${api.outputs.fqdn}/health'
 output apiResourceId string = api.outputs.resourceId
+output appInsightsName string = monitoring.outputs.componentName
 output sqlServerFqdn string = sql.outputs.fullyQualifiedDomainName
 output sqlDatabaseName string = sql.outputs.databaseName
 output serviceBusFqdn string = serviceBus.outputs.fullyQualifiedNamespace

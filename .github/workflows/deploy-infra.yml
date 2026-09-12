@@ -157,9 +157,18 @@ jobs:
           # Splat a HASHTABLE, not an array. Array splatting binds positionally,
           # so @('-Environment','dev') passes the literal string "-Environment"
           # as the first positional parameter and ValidateSet rejects it.
+          # AllowEnvironmentInStackResourceGroup: since the move to the new
+          # subscription each environment's Container Apps managed environment
+          # sits in that environment's own resource group - quotes-cae-dev is
+          # in rg-quotes-dev - because no region this subscription is allowed
+          # to use offers both a standard managed environment and the rest of
+          # the stack. The script refuses that arrangement unless told the loss
+          # is acceptable, and here it is: the environment hosts this stack's
+          # app and nothing else, so it goes when the group goes.
           $p = @{
-            Environment             = $env:TARGET
-            ReuseManagedEnvironment = $true
+            Environment                          = $env:TARGET
+            ReuseManagedEnvironment              = $true
+            AllowEnvironmentInStackResourceGroup = $true
           }
           if ($env:PREVIEW -eq 'true') { $p.Preview = $true }
           Write-Host "azd-provision.ps1 $($p | ConvertTo-Json -Compress)"
