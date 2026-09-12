@@ -1422,6 +1422,89 @@ ever manages something Azure cannot delete through the stack API, teardown
 halts rather than quietly leaving it behind — the exact opposite of Finding
 2's `azd down`, which reported success having deleted nothing at all.
 
+## The promotion to prod, actually run
+
+Everything above described the promotion in the conditional: merging to `main`
+*would* provision prod behind an approval gate. It never had. prod was blocked
+on `apiSchemaBootstrap = 'Migrate'` against a repo with only SQLite migrations
+(Finding 17), and the subscription it would have been billed to has since
+expired. So "deploy to dev, then promote to prod" was half an exercise - the
+dev half, run many times, and a prod half that existed only as a parameter file.
+
+On 12 September it ran, in the new subscription, as a scoped evidence
+deployment: prod stood up, verified, and torn down inside half an hour, with
+`apiSchemaBootstrap` conceded to `EnsureCreated` for that window and the
+reasoning written into main.prod.bicepparam rather than left contradicting the
+value above it.
+
+What the promotion produced, in `rg-quotes-prod`:
+
+```
+DEPLOYMENT STACK   azd-stack-prod   succeeded   33 resources
+
+PRIVATE ENDPOINTS  kv-prod-aqusn4omgvpdk-pe          Succeeded  Approved
+                   quotes-sb-prod-aqusn4omgvpdk-pe   Succeeded  Approved
+                   quotes-sql-prod-aqusn4omgvpdk-pe  Succeeded  Approved
+
+DNS ZONES          privatelink.database.windows.net     2 records
+                   privatelink.servicebus.windows.net   2 records
+                   privatelink.vaultcore.azure.net      2 records
+
+SERVICE BUS        Premium, capacity 1
+CONTAINER APP      quotes-api-prod   Running
+```
+
+Three endpoints rather than dev's two, because the Service Bus endpoint is
+gated on the Premium SKU that only prod asks for - the difference the two
+parameter files exist to express, observed rather than asserted.
+
+### The deployment succeeded and the workflow called it a failure
+
+The run went red. `azd` exited non-zero with
+
+```
+ResourceNotFound: The resource 'azd-stack-prod' was not found.
+```
+
+which is Finding 12's signature exactly - azd reporting a failure for an
+operation Azure was still performing. The verification step exists precisely to
+overrule azd on that, and it overruled in the wrong direction:
+
+```
+azd outcome : failure
+stack state : missing
+Error: azd failed and the stack is 'missing'. This is a real failure.
+```
+
+It was not a real failure. `azd-stack-prod` reached `succeeded` at
+`2026-09-12T18:10:19Z` with all 33 resources. The verification loop polled 40
+times at 15-second intervals - ten minutes - and gave up while the deployment
+was still running. A Premium Service Bus namespace alone routinely takes longer
+than ten minutes to provision, and prod creates one plus a General Purpose SQL
+database; dev creates neither, which is why the budget had never been tested.
+
+The loop is now 120 attempts - thirty minutes. The interesting part is the
+asymmetry, which the first version got backwards. Waiting too long on a genuine
+failure costs runner minutes. Giving up too early reports a live, correctly
+deployed prod as broken - and the obvious remedy for "the stack is missing" is
+to delete the stack and redeploy, which with `actionOnUnmanage.resourceGroups:
+delete` would take the entire resource group with it. A check that cannot tell
+"this failed" from "this has not finished yet" does not merely misreport; it
+recommends the destructive fix.
+
+### Teardown
+
+Deleting the stack through `az stack sub delete` failed with "DeploymentStack
+azd-stack-prod not found in the current subscription scope" - from a CLI whose
+own `az stack sub list` was returning that stack, by that name, at that scope,
+in the same session. The resource group was deleted directly instead, which the
+stack's own `denySettings.excludedActions` permits for exactly this reason. The
+clean-teardown property is a property of the stack, not of the CLI build that
+happened to be installed.
+
+Prod was live for roughly 25 minutes, about Rs 50 of Premium Service Bus and
+General Purpose SQL.
+
 ## GitHub link
 
 https://github.com/thinkbridge-thinkschool/Thinkbridge_Shruti_Sahrawat/tree/main/Days/day-24

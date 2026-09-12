@@ -162,6 +162,46 @@ Six assertions, six passes, and the same template ran unchanged in both
 environments - the only difference is the SKU condition that decides whether
 the Service Bus endpoint exists at all.
 
+### Re-verified in the new subscription
+
+The evidence above was produced in the original subscription, which has since
+expired. The endpoints were stood up again in the new one on 12 September, dev
+continuously and prod as a timeboxed evidence deployment.
+
+dev, two endpoints - no Service Bus endpoint, because dev's namespace is
+Standard and the module is gated on Premium:
+
+```
+kv-dev-wewdp2fyybrgs-pe          rg-quotes-dev  Succeeded
+quotes-sql-dev-wewdp2fyybrgs-pe  rg-quotes-dev  Succeeded
+
+privatelink.database.windows.net  2 records
+privatelink.vaultcore.azure.net   2 records
+```
+
+prod, three - the same template, the same parameters, one SKU different:
+
+```
+kv-prod-aqusn4omgvpdk-pe          Succeeded  Approved
+quotes-sb-prod-aqusn4omgvpdk-pe   Succeeded  Approved
+quotes-sql-prod-aqusn4omgvpdk-pe  Succeeded  Approved
+
+privatelink.database.windows.net    2 records
+privatelink.servicebus.windows.net  2 records
+privatelink.vaultcore.azure.net     2 records
+```
+
+`numberOfVirtualNetworkLinksWithRegistration` reads 0 on every zone, and that
+is the correct value rather than a missing link: the links are created with
+`registrationEnabled: false`, because these zones resolve private endpoints and
+are not a registration surface for VM hostnames. The count that matters is the
+record count, and it is 2 per zone in both environments.
+
+SQL still reports `publicNetworkAccess: Enabled` in both, for the reason set
+out above - the container app is not VNet-integrated, so the public path is
+still the one it uses. The endpoints are proven to exist and resolve; they are
+not yet proven to be the only route in.
+
 ## What went wrong on the way, and what it cost to find
 
 Five failures, none of them in the Bicep, and all five of the same family as

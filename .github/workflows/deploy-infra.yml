@@ -191,7 +191,21 @@ jobs:
           stack="azd-stack-$TARGET"
 
           # azd can die before Azure finishes. Wait for a terminal state.
-          for _ in $(seq 1 40); do
+          #
+          # 120 attempts, not 40. The first prod promotion failed here with
+          # "the stack is 'missing'" for a deployment that succeeded: the stack
+          # reached `succeeded` at 18:10:19Z, and this loop had already given up
+          # and failed the job. 40 x 15s is ten minutes, which is enough for dev
+          # and not enough for prod - a Premium Service Bus namespace alone
+          # regularly takes longer than that, and prod provisions one plus a
+          # General Purpose SQL database.
+          #
+          # The bug was the patience, not the deployment, and the cost of being
+          # wrong is asymmetric: waiting too long on a genuine failure loses
+          # runner minutes, while giving up too early reports a live, correct
+          # prod as broken - and invites someone to "fix" it by deleting the
+          # stack, which would take the resource group with it.
+          for _ in $(seq 1 120); do
             state=$(az stack sub show --name "$stack" --query provisioningState -o tsv 2>/dev/null || echo missing)
             case "$state" in succeeded|failed|canceled) break ;; esac
             sleep 15
