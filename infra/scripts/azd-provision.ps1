@@ -12,6 +12,11 @@ scripts/select-bicepparam.ps1 for why that cannot be a preprovision hook.
     # deploy dev into the one managed environment this subscription allows:
     ./scripts/azd-provision.ps1 -Environment dev -ReuseManagedEnvironment
 
+    # ...when that environment is in the stack's own resource group, as
+    # quotes-cae-dev is since the move to the new subscription:
+    ./scripts/azd-provision.ps1 -Environment dev -ReuseManagedEnvironment `
+        -AllowEnvironmentInStackResourceGroup
+
 Run from infra/. Everything it calls is ordinary azd - there is nothing here
 that a person could not type by hand, and the -WhatIf-style dry run is azd's
 own `--preview`, not a reimplementation of one.
@@ -38,7 +43,12 @@ param(
     # around" is the wrong behaviour for a subscription with room, and silently
     # right behaviour is how a stack ends up depending on infrastructure nobody
     # meant to share.
-    [switch]$ReuseManagedEnvironment
+    [switch]$ReuseManagedEnvironment,
+
+    # Acknowledge that the environment being reused sits inside the resource
+    # group this stack owns, and that `azd down` will therefore destroy it.
+    # Refused by default; the guard below explains when saying yes is right.
+    [switch]$AllowEnvironmentInStackResourceGroup
 )
 
 $ErrorActionPreference = 'Stop'
@@ -186,12 +196,34 @@ if ($ReuseManagedEnvironment) {
     # not resource-scoped: it takes unmanaged contents with it. So the one
     # arrangement where `azd down` would destroy the environment it borrowed is
     # the one where that environment sits inside the stack's own group, and
-    # being unmanaged is precisely why nothing would stop it. Today the live
-    # environment is in a different group; that is worth asserting rather than
-    # relying on.
+    # being unmanaged is precisely why nothing would stop it.
+    #
+    # Refusing outright was free while the borrowed environment lived in
+    # rg-thinkschool-dev2, because it also hosted a *different* live app: a
+    # stray `azd down` would have destroyed something this project does not
+    # own, and no amount of operator intent makes that acceptable.
+    #
+    # It stopped being free after the move to the new subscription. Central
+    # India cannot host a Container Apps environment at all, and East Asia
+    # hands out only express ones, which reject the keyVaultUrl secret
+    # references this stack deploys with - so quotes-cae-dev had to be created
+    # by hand in UAE North, and it went into rg-quotes-dev, this stack's own
+    # group. Nothing else uses it. It exists to host this stack's dev container
+    # app and nothing else, so `azd down` taking it along is not a surprise
+    # that breaks a third party - it is dev being torn down, and standing dev
+    # back up recreates it the same way.
+    #
+    # The two shapes are indistinguishable from inside this script, so the
+    # check stays and stays refusing by default: a caller who has not thought
+    # about it should be stopped. What is new is that a caller who *has*
+    # thought about it can say so, in a switch too verbose to pass by accident.
     $stackResourceGroup = (Select-String -Path (Join-Path (Split-Path $PSScriptRoot -Parent) 'main.bicepparam') -Pattern "^param resourceGroupName\s*=\s*'([^']+)'").Matches.Groups[1].Value
     if ($stackResourceGroup -and $env0.id -match "/resourceGroups/$([regex]::Escape($stackResourceGroup))/") {
-        throw "The managed environment to reuse ($($env0.name)) is inside '$stackResourceGroup', which is this stack's own resource group - `azd down` deletes that group and would take the environment with it even though the stack never managed it. Move the environment, or deploy this stack into a different resource group."
+        if (-not $AllowEnvironmentInStackResourceGroup) {
+            throw "The managed environment to reuse ($($env0.name)) is inside '$stackResourceGroup', which is this stack's own resource group - 'azd down' deletes that group and would take the environment with it even though the stack never managed it. Move the environment, deploy this stack into a different resource group, or pass -AllowEnvironmentInStackResourceGroup to accept losing the environment whenever the group goes."
+        }
+
+        Write-Warning "$($env0.name) lives in this stack's own resource group ('$stackResourceGroup'), so 'azd down' will destroy it along with the group even though the stack never managed it. Continuing because -AllowEnvironmentInStackResourceGroup was passed."
     }
 
     Write-Host "reusing '$($env0.name)' in $($env0.location) [state: $($env0.state)]"
