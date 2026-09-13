@@ -77,6 +77,11 @@ jobs:
       # have to be process environment variables, not only azd ones.
       AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
       JWT_SIGNING_KEY: ${{ secrets.JWT_SIGNING_KEY }}
+      # A secret rather than a variable, though it is not a credential. It is a
+      # personal email address, this repository is public, and repository
+      # variables render in plaintext in the Actions UI and in logs. Naming the
+      # account that holds the admin role is a hint worth not giving away.
+      API_ADMIN_EMAILS: ${{ secrets.API_ADMIN_EMAILS }}
     steps:
       - uses: actions/checkout@v4
 

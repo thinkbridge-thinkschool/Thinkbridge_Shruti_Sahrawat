@@ -212,6 +212,11 @@ param apiAspNetCoreEnvironment = 'Production'
 // (Days/day-26). Create().GetBytes() works on both.
 param apiJwtSigningKey = readEnvironmentVariable('JWT_SIGNING_KEY')
 
+// Comma-separated, and absent from this file on purpose - see AuthOptions and
+// main.bicep. Unset means no admin can be created by registration, which is the
+// safe default for an environment nobody has claimed yet.
+param apiAdminEmails = readEnvironmentVariable('API_ADMIN_EMAILS', '')
+
 // 90 days, so an incident review in month three still has the logs it needs.
 param logAnalyticsRetentionInDays = 90
 

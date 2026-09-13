@@ -106,6 +106,11 @@ var resolvedAppInsightsName = empty(appInsightsName) ? '${namePrefix}-appi-${env
 // environment was fixed and the database had to move, here the database is
 // fixed and the environment has to.
 var resolvedApiLocation = empty(apiLocation) ? location : apiLocation
+// filter() drops the empty strings a trailing comma or a doubled separator
+// would otherwise turn into an admin whose email is "".
+var resolvedAdminEmails = empty(apiAdminEmails)
+  ? []
+  : filter(split(apiAdminEmails, ','), email => !empty(trim(email)))
 
 // -----------------------------------------------------------------------------
 // SQL
@@ -217,6 +222,16 @@ that found it.
 ''')
 @secure()
 param apiJwtSigningKey string
+
+@description('''
+Comma-separated emails that receive the admin role at registration.
+
+A string rather than an array because it arrives from an environment variable,
+and readEnvironmentVariable returns strings; it is split below. Never written
+into a parameter file: AuthOptions documents why a personal address does not
+belong in a repository anyone can read, and this one is public.
+''')
+param apiAdminEmails string = ''
 
 @description('Key Vault name. Globally unique, 3-24 characters. Generated from the environment and the deterministic token when left empty.')
 @maxLength(24)
@@ -436,6 +451,7 @@ module api 'modules/api.bicep' = {
     jwtSecretUri: keyVault.outputs.jwtSecretUri
     keyVaultIdentityResourceId: identity.outputs.resourceId
     appInsightsName: monitoring.outputs.componentName
+    adminEmails: resolvedAdminEmails
   }
   dependsOn: [
     registryAccess
