@@ -152,6 +152,16 @@ the path between ARM and the container app and out of every record in between.
 ''')
 param appInsightsName string
 
+@description('''
+Emails that receive the admin role when they register, rendered as the indexed
+environment variables .NET binds an array from: Auth__AdminEmails__0, __1, and
+so on.
+
+Empty is a valid and meaningful value - it means no registration can mint an
+admin - so this parameter has no default and each environment states its own.
+''')
+param adminEmails array = []
+
 @description('Port the container listens on. 8080 is what QuotesApi\'s Dockerfile exposes.')
 param targetPort int = 8080
 
@@ -214,6 +224,18 @@ var baseEnv = [
     value: appInsights.properties.ConnectionString
   }
 ]
+
+// Configuration binding turns Auth__AdminEmails__0 / __1 / ... back into the
+// string[] AuthOptions.AdminEmails. Built from the array rather than taking a
+// single pre-indexed value, because the old arrangement - one hand-typed
+// Auth__AdminEmails__0 on the container app - could not express a second admin
+// and, being unmanaged, was silently removed by the next provision. The app
+// went on running with an empty admin list, which looks identical to an app
+// that was never meant to have one.
+var adminEmailEnv = [for (email, i) in adminEmails: {
+  name: 'Auth__AdminEmails__${i}'
+  value: trim(email)
+}]
 
 var serviceBusEnv = empty(serviceBusFqdn) ? [] : [
   {
@@ -343,7 +365,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             cpu: json(cpu)
             memory: memory
           }
-          env: concat(baseEnv, serviceBusEnv)
+          env: concat(baseEnv, serviceBusEnv, adminEmailEnv)
           probes: [
             {
               type: 'Liveness'
