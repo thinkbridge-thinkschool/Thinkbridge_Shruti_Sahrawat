@@ -65,4 +65,7 @@ infra/main.bicepparam
 # the source. A build artifact: azd compiles the .bicep itself on every
 # provision and never reads this, so a committed copy could only ever be a
 # stale second version of main.bicep.
-infra/main.json
+# Globbed, not a single path. This rule named infra/main.json alone until
+# infra/shared/ appeared and its compiled output was committed before anyone
+# noticed - the rule was right and its scope was one directory too narrow.
+infra/**/main.json
