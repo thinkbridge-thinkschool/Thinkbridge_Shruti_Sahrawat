@@ -66,6 +66,28 @@ environment cannot exist without a Log Analytics workspace to point at, and
 neither outlives the app in any scenario this stack has. A module per resource
 would be filing, not structure.
 
+### What is deliberately not in this template
+
+`infra/shared/main.bicep` holds the container registry, and it is a separate
+deployment rather than a module of this one. The reason is `azd down`.
+
+azure.yaml sets `actionOnUnmanage.resourceGroups: delete`, so tearing down an
+environment deletes that environment's whole resource group. A registry owned by
+the dev stack would go with it - taking the image prod pulls from, so prod would
+keep serving from its running revision and fail the next time it tried to start
+one. The failure lands on the environment nobody touched, well after the action
+that caused it. Owning it from both stacks is worse: each would believe it
+managed the registry, and the first teardown would win.
+
+So "everything in one template" is not the goal. The goal is that each resource
+is owned by exactly one thing whose lifecycle matches its own, and a registry
+shared by two environments does not share either environment's lifecycle. It is
+still infrastructure as code; it is just code with a different blast radius.
+
+The same reasoning is why it is a plain `az deployment sub create` rather than a
+deployment stack: a stack's value is clean teardown, and this template's defining
+property is that it is never torn down.
+
 ### There are no secrets in this stack, and that is a design decision
 
 Nothing in `infra/` is marked `@secure()`, because nothing needs to be:

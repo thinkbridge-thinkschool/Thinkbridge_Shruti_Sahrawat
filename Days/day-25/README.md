@@ -449,6 +449,36 @@ Entra-ID-only with no administrator login defined, Service Bus runs
 `disableLocalAuth: true` so no SAS key is ever issued, and the one remaining
 secret is in a vault. The credentials are not hidden; they were never created.
 
+## A postscript: the setting that was never in a template
+
+This day's proof was that no *secret* reaches the container app outside Key
+Vault. It did not ask where the app's non-secret configuration came from, and a
+later audit found the answer was "someone typed it".
+
+`Auth__AdminEmails__0` - the setting that decides who gets the admin role at
+registration - was set by hand on the container app during an earlier session.
+The container app is managed by the deployment stack, so a subsequent provision
+removed it. Nothing failed. `AdminEmails` is read once, at registration
+(`AuthEndpoints.cs`), and the resulting role is written to the user row, so the
+existing admin kept working long after the configuration that created it had
+gone. What was actually lost was the ability to create a second admin, and any
+admin at all if the database were ever rebuilt - a capability that fails only on
+a path nobody had walked yet.
+
+It is now a template parameter, rendered as `Auth__AdminEmails__0`, `__1`, ...
+from an array, with the value supplied by an environment variable and never
+written into a parameter file. That last part is this day's argument applied
+one step further out: `AuthOptions` already explains that a personal address
+does not belong in a repository anyone can read, and this repository is public.
+In CI it is a secret rather than a variable for a reason that is not about
+secrecy of the value - repository variables render in plaintext in the Actions
+UI, and naming which account holds admin is a hint worth withholding.
+
+The wider lesson is the one Day 26 would repeat with Application Insights: a
+template that does not mention a setting cannot contradict a hand-made one, and
+a hand-made setting on a managed resource is not a shortcut - it is a change
+with a delayed, silent undo.
+
 ## GitHub link
 
 https://github.com/thinkbridge-thinkschool/Thinkbridge_Shruti_Sahrawat/tree/main/Days/day-25

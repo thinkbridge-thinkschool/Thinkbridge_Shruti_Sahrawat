@@ -1505,6 +1505,39 @@ happened to be installed.
 Prod was live for roughly 25 minutes, about Rs 50 of Premium Service Bus and
 General Purpose SQL.
 
+### The fix, verified
+
+The paragraph above was written the same night, which meant it claimed a fix
+nothing had tested. The loop was longer; whether a prod promotion would now be
+reported honestly was an assertion.
+
+It was re-run the following morning, after the two remaining template gaps were
+closed so that prod would exercise them too:
+
+```
+deploy-infra #23   main @ 814daa3   Success   14m 47s
+  resolve     4s
+  provision   10m 30s
+```
+
+Green, on the same path that produced the red run - same template, same Premium
+Service Bus, same slow provision. The difference is only that the verification
+step waited long enough to see the stack finish. prod came up with 33 resources,
+three approved private endpoints, and both parameters that had not existed in
+prod before that morning:
+
+```
+APPLICATIONINSIGHTS_CONNECTION_STRING   present
+Auth__AdminEmails__0                    present
+```
+
+Then torn down again, for the same reason as the first time: a Premium Service
+Bus and a General Purpose SQL database are together about Rs 2,800 a day, and
+this subscription's remaining credit is worth more as a working dev environment
+than as an idle prod one. The promotion is fifteen minutes away whenever it is
+wanted, which is the property worth having - prod that can be rebuilt on demand
+rather than prod that must never be switched off.
+
 ## GitHub link
 
 https://github.com/thinkbridge-thinkschool/Thinkbridge_Shruti_Sahrawat/tree/main/Days/day-24
