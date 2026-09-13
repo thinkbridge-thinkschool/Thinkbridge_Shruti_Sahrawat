@@ -313,3 +313,55 @@ first `deployment sub create` would fully evaluate `servicebus` and `api` too,
 because `principalId` would then be a concrete GUID instead of an unresolved
 reference. Worth stating plainly rather than either hiding the diagnostic or
 overclaiming the plan proved more than it did.
+
+## GitHub link
+
+https://github.com/thinkbridge-thinkschool/Thinkbridge_Shruti_Sahrawat/tree/main/infra
+
+## What did you learn this session?
+
+<!-- one line, in your own words -->
+
+## What would break this?
+
+**Nothing enforces that dev and prod stay different.** The two parameter files
+are the entire separation between a Basic database and a General Purpose one,
+between Standard and Premium Service Bus, between two replicas and ten. Paste
+dev's SKU block into `main.prod.bicepparam` and the result is a perfectly valid
+template, a clean `az bicep build`, and a successful deployment of a production
+environment sized for development. `what-if` would report the change
+accurately and have no opinion about whether it was intended. The
+guard is review, and review is a person reading a diff at the end of a long day.
+
+**Resource names are derived, so renaming the resource group creates an empty
+database.** `resourceToken` is
+`uniqueString(subscription().id, resourceGroupName, environmentName)`, and the
+SQL server, Service Bus namespace and vault all carry it. Change any of those
+three inputs - including editing `resourceGroupName` in a parameter file, which
+reads like a cosmetic rename - and the next deployment does not rename anything.
+It provisions a *new* server with a new name alongside the old one, and the
+application points at the empty one. Deterministic naming is the property that
+makes the template idempotent, and the same property makes an innocuous-looking
+edit a data-loss event.
+
+**The `sqlAadAdminObjectId` has to be a principal that exists in this tenant,
+and nothing in the template knows which tenant that is.** It is an opaque GUID
+in a parameter file. Move the subscription to a different tenant and it stays
+syntactically valid while referring to nobody - which is exactly what happened
+when this project moved to a new subscription: every AAD-shaped parameter was
+still well-formed and every one of them was wrong.
+
+**`what-if` proves least on the deployment that most needs it.** ARM cannot
+evaluate a module whose inputs are unresolved `reference()`s to a sibling that
+does not exist yet, so on a first deployment into an empty environment it skips
+validating `servicebus` and `api` - the two most complex modules - and says so.
+The plan is strongest against an environment that already exists and weakest
+against the one nobody has seen before.
+
+**"No portal click-ops" is a claim about discipline, not a property of the
+template.** Nothing here detects that someone added an environment variable in
+the portal, and nothing reverts it. Day 24's deployment stacks close part of
+this by making unmanaged resources visible; they still do not stop a hand-edit
+to a managed one. Both the hand-set `Auth__AdminEmails__0` and the hand-created
+Application Insights survived for weeks precisely because a template that does
+not mention something cannot contradict it.
