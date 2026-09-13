@@ -25,17 +25,43 @@ and its backend link, App Insights, and the CI identity.
 |---|---|---|
 | Resource group, SQL server + db, Service Bus + topic + subscriptions, Key Vault + secret, Log Analytics, Container App, managed identity, role assignments | `infra/main.bicep` | `azd provision` |
 | VNet, private DNS zones, private endpoints (Day 27) | `infra/modules/network.bicep`, `private-endpoint.bicep` | same, via `enablePrivateEndpoints` |
-| Container registry | **not in the template** - passed in as `ACR_LOGIN_SERVER` / `ACR_RESOURCE_ID` | `az acr create`, by hand |
+| Container registry | `infra/shared/main.bicep` | `az deployment sub create` - see below |
 | The API image itself | built from `QuotesApi/` | `dotnet publish /t:PublishContainer` |
 | Static Web App (frontend host) | **not in the template** | `az staticwebapp create`, by hand |
 | SWA -> container app backend link | **not in the template, not in any file** | `az staticwebapp backends link`, by hand |
-| Application Insights | **not in the template** (the old one lived in rg-thinkschool-dev2) | `az monitor app-insights component create`, by hand |
+| Application Insights | `infra/modules/monitoring.bicep` | `azd provision` |
 | GitHub OIDC identity + federated credentials | `docs/promotion-flow.md` | by hand, in the new tenant |
 | SQL user for the managed identity | `infra/scripts/create-sql-user.sql` | run by hand against the new db |
 
 The right-hand column is the honest measure of how complete the
-infrastructure-as-code is. Five rows say "by hand", and each one is a thing
-that has to be remembered rather than run.
+infrastructure-as-code is. It said "by hand" five times when this document was
+written. Two of those have since been closed - Application Insights, after the
+migration proved the cost of leaving it out (Days/day-26), and the container
+registry, into a shared template of its own.
+
+Three remain, and they are related: the Static Web App, its backend link, and
+the SQL user for the managed identity. Each depends on something an environment
+stack produces, so each has to run after a provision rather than as part of one.
+That is an ordering problem rather than an oversight, but the practical effect
+is the same - a rebuild from scratch is three remembered steps away from
+working.
+
+### Deploying the shared template
+
+Once, per subscription, and not through azd - it is not part of either
+environment's deployment stack, for the reasons set out at the top of
+`infra/shared/main.bicep`:
+
+```powershell
+az deployment sub create `
+  --name shared-infra `
+  --location centralindia `
+  --template-file infra/shared/main.bicep `
+  --parameters infra/shared/main.bicepparam
+```
+
+Re-running it adopts the existing registry rather than creating another, so it
+is safe to run again to check for drift.
 
 ## Phase A - identity in the new tenant
 
