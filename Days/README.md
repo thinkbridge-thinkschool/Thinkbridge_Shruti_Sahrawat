@@ -30,11 +30,14 @@ Quick navigation into each day's brief, code, and evidence. The full narrative (
 | 24 | Deployment Stacks + azd | [`Days/day-24/`](day-24/README.md) |
 | 25 | Identity end-to-end | [`Days/day-25/`](day-25/README.md) |
 | 26 | App Insights + KQL | [`Days/day-26/`](day-26/README.md) |
+| 27 | Security pass: threat model, private endpoints, ZAP | [`Days/day-27/`](day-27/README.md) |
+| 28 | Design review + ADR | [`Days/day-28/`](day-28/README.md) |
 
 Day 6 was a holiday — no exercise that day.
 
 ## Cross-cutting reference (not tied to one day)
 
+- [Architecture decision records](../docs/adr/README.md)
 - [Concept cards](reference/concept-cards.md)
 - [Bugs these tests caught](reference/bugs-caught.md)
 - [Running it](reference/running-it.md)
