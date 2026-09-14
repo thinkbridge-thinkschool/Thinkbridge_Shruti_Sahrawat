@@ -50,8 +50,11 @@ builder.Services.AddSingleton<IFeedWriter>(sp => sp.GetRequiredService<InMemoryF
 builder.Services.AddSingleton<IProcessedMessageLog, InMemoryProcessedMessageLog>();
 builder.Services.AddSingleton<CollectionPublishedHandler>();
 
-// The stand-in for Day 20's relay process.
+// The stand-in for Day 20's relay process, and the background loop that drives
+// it. The loop is what keeps the drain off the request path - see
+// RelayHostedService for why that is a correctness property and not tidiness.
 builder.Services.AddSingleton<Capstone.Api.InProcessRelay>();
+builder.Services.AddHostedService<Capstone.Api.RelayHostedService>();
 
 var app = builder.Build();
 
@@ -108,21 +111,31 @@ app.MapPost("/api/collections/{id:guid}/items", async (
     return Results.Ok(new { items = collection.Items.Count });
 });
 
-// The slice. Publish commits; the relay then carries the announcement to
-// Sharing. Draining inline is the scaffold's shortcut, not the design - see
-// InProcessRelay.
+// The slice, and the one endpoint whose shape is a design decision rather than
+// a routing detail. It returns as soon as the handler has committed the state
+// change and the outbox row together, because that commit is the whole promise
+// being made to the curator: the collection is published, durably, and the
+// announcement cannot now be lost.
+//
+// It deliberately does not wait for the fan-out and deliberately reports no
+// delivery count. An earlier version drained the relay here and returned
+// messagesRelayed, which read as helpful and was not: it put Sharing's
+// availability on the publish path, so a feed-store failure answered a curator
+// with an error for an operation that had already succeeded, and it tied the
+// response time of a publish to how many followers had to be written. Both are
+// what the outbox was adopted to prevent. RelayHostedService drains instead.
+//
+// A follower's feed is therefore eventually consistent, by design. Reading it
+// the instant this returns can legitimately show nothing yet.
 app.MapPost("/api/collections/{id:guid}/publish", async (
     Guid id,
     PublishCollectionRequest request,
     PublishCollectionHandler handler,
-    Capstone.Api.InProcessRelay relay,
     CancellationToken cancellationToken) =>
 {
     await handler.HandleAsync(new PublishCollectionCommand(id, request.CuratorId), cancellationToken);
 
-    var delivered = await relay.DrainAsync(cancellationToken);
-
-    return Results.Ok(new { published = true, messagesRelayed = delivered });
+    return Results.Ok(new { published = true });
 });
 
 app.MapPost("/api/follows", (FollowRequest request, InMemoryFollowerDirectory directory) =>

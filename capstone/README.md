@@ -7,6 +7,10 @@ their followers see it appear in their feed. One user-visible outcome, narrow
 enough to build, wide enough to need three bounded contexts, a real aggregate,
 and an asynchronous flow that must survive one half of it being down.
 
+The decision this design turns on — modules as assemblies, with the permitted
+dependency graph enforced as a test — is recorded in
+[ADR-0001](../docs/adr/0001-modules-as-assemblies-enforced-by-tests.md).
+
 It is a slice of a product this repository already half-has: `QuotesApi` has
 quotes and a `Collection` aggregate, and Days 19–22 built the outbox, the
 Service Bus topic, the relay and the resilience pipeline that publishing needs.
@@ -139,6 +143,15 @@ after that is catch-up. Publishing inside the transaction instead would tie one
 curator's publish latency to their follower count and fail the publish outright
 when the feed store is unavailable — for a feed, clearly the wrong trade.
 
+That claim was false in the code until [Day 28's design
+review](../Days/day-28/README.md): the publish endpoint drained the relay inline
+and returned the delivered count, which put Sharing on the publish path and
+answered a curator with an error for a collection that was already published.
+The drain now runs in
+[`RelayHostedService`](src/Capstone.Api/RelayHostedService.cs) and the endpoint
+returns at the commit. The diagram above did not change — the code moved to
+meet it.
+
 **Why an outbox and not a publish call.** A publish after the commit can be
 lost; a publish before it can announce something that then rolls back. Only a
 row written *inside* the transaction is safe. That is Day 20's lesson, and it is
@@ -228,7 +241,7 @@ template. Sharing has none, because nothing consumes Sharing yet.
 | The `Collection` aggregate and every invariant, unit-tested | Persistence — in-memory; EF mapping is the next piece |
 | The publish use case, including the cross-context check | `IQuoteCatalog` — a seeded dictionary, not the real quote tables |
 | Domain-event → integration-event translation | Feed, follows and dedup stores — dictionaries |
-| The module boundaries, enforced by CI | The relay — in-process and called inline, standing in for Day 20's separate relay + Service Bus |
+| The module boundaries, enforced by CI | The relay — in-process and polled by a background loop, standing in for Day 20's separate relay + Service Bus |
 
 The split is deliberate: Catalog's behaviour is already proven by 54 integration
 tests in the main solution, so a stub there costs nothing. Curation's is not
@@ -272,3 +285,8 @@ The API is walkable end to end in one process — create a collection, add
 quotes 1–3, follow the curator, publish, read the feed — which is the point of
 the in-process relay: the seam it will be replaced at is visible in code rather
 than described in a document.
+
+Read the feed immediately after publishing and it may still be empty. That is
+the design, not a race: publish returns at the commit and the relay drains on a
+250 ms poll, so the feed is eventually consistent by construction. Read it
+again.
