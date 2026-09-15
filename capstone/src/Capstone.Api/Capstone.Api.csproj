@@ -20,4 +20,23 @@
     <ProjectReference Include="..\Modules\Sharing\Capstone.Sharing.Infrastructure\Capstone.Sharing.Infrastructure.csproj" />
   </ItemGroup>
 
+  <!--
+    Design-time only, and required here rather than only in the project that
+    owns CurationDbContext: `dotnet ef` builds and inspects the STARTUP
+    project, so the tools look for this package on Capstone.Api even when
+    migrations are written into Capstone.Curation.Infrastructure. The
+    Infrastructure copy carries PrivateAssets=all - correctly, since a
+    design-time tool is not something dependents should inherit - which is
+    exactly why it does not satisfy the tooling from over there.
+
+    PrivateAssets=all here too: this is a build-time tool, and it must not
+    end up as a runtime dependency of the published container image.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.10">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
 </Project>

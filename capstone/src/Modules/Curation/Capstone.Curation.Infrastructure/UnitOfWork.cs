@@ -9,44 +9,30 @@ namespace Capstone.Curation.Infrastructure;
 /// unit.
 /// </summary>
 /// <remarks>
-/// Scaffold: the tracking and the commit are in-memory. The sequence, however,
-/// is the real one and is the part worth pinning down early -
+/// Day 1 of the build plan: the aggregate side of this is now real -
+/// SaveChangesAsync against SQL rather than a dictionary assignment. The
+/// outbox side stays in-memory until Day 2 builds the real table, so "one
+/// transaction" is not fully true yet for the outbox row specifically - it is
+/// true for the aggregate's own state, which is what this day set out to
+/// prove. Making the outbox itself transactional is deliberately left for
+/// Day 2 rather than folded in here, so each day lands with the tests green
+/// and one clear thing changed.
 ///
-/// <list type="number">
-/// <item>drain every tracked aggregate's domain events;</item>
-/// <item>translate each into an outbox record;</item>
-/// <item>clear the aggregate's events so a second commit cannot republish
-/// them;</item>
-/// <item>persist state and outbox rows in a single transaction.</item>
-/// </list>
-///
-/// Step 4 is the whole reason this type exists rather than a handler calling a
-/// publisher. Day 20 established why: a publish that happens after the commit
-/// can be lost, and a publish that happens before it can announce something
-/// that then rolls back. Only a row written inside the transaction is safe, and
-/// only something that owns the transaction can write it.
+/// No separate Track() list any more - the DbContext's own change tracker is
+/// the list. Everything CollectionRepository loaded or added in this request
+/// is already in it, because both operations went through the same scoped
+/// CurationDbContext instance.
 /// </remarks>
-public sealed class UnitOfWork(IOutboxStore outbox) : IUnitOfWork
+public sealed class UnitOfWork(CurationDbContext db, IOutboxStore outbox) : IUnitOfWork
 {
-    private readonly List<Collection> _tracked = [];
-
-    public void Track(Collection collection)
-    {
-        // Reference equality is the right check: two loads of the same row
-        // must not produce two tracked instances, and if they somehow did,
-        // draining both would stage the same event twice.
-        if (!_tracked.Contains(collection))
-        {
-            _tracked.Add(collection);
-        }
-    }
-
-    public Task<int> CommitAsync(CancellationToken cancellationToken)
+    public async Task<int> CommitAsync(CancellationToken cancellationToken)
     {
         var staged = 0;
 
-        foreach (var aggregate in _tracked)
+        foreach (var entry in db.ChangeTracker.Entries<Collection>().ToList())
         {
+            var aggregate = entry.Entity;
+
             foreach (var domainEvent in aggregate.DomainEvents)
             {
                 var record = DomainEventTranslator.ToOutboxRecord(domainEvent);
@@ -61,11 +47,16 @@ public sealed class UnitOfWork(IOutboxStore outbox) : IUnitOfWork
             aggregate.ClearDomainEvents();
         }
 
-        // A committed aggregate is no longer this unit of work's business.
-        // Holding them would both leak and, worse, risk a later commit
-        // re-draining an aggregate whose events were already staged.
-        _tracked.Clear();
+        // Named honestly rather than hidden: outbox.Enqueue above already ran
+        // before this line, so if SaveChangesAsync throws - a constraint
+        // violation, a dropped connection - the in-memory outbox has staged
+        // an event for a state change that did not actually persist. That is
+        // exactly the gap a real outbox closes by writing the row in the same
+        // transaction as the state change, which is Day 2's job, not this
+        // day's. Today's scope is proving the aggregate's own state is real
+        // SQL; the outbox becoming equally real is the very next commit.
+        await db.SaveChangesAsync(cancellationToken);
 
-        return Task.FromResult(staged);
+        return staged;
     }
 }

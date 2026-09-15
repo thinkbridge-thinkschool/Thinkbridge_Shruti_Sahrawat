@@ -13,4 +13,29 @@
     <ProjectReference Include="..\Capstone.Curation.Contracts\Capstone.Curation.Contracts.csproj" />
   </ItemGroup>
 
+  <!--
+    Day 1 of the build plan. EF Core lives here and only here in this module -
+    ModuleBoundaries.Allowed does not list EF anywhere near
+    Capstone.Curation.Domain, so the domain acquiring a persistence dependency
+    by accident fails DeclaredReferenceTests rather than being caught later by
+    a reviewer.
+
+    Both providers, for the same reason QuotesApi references both: SQLite is
+    what a laptop can run with nothing installed, SQL Server is what the Day
+    23-26 infrastructure actually provisions, and the composition root picks
+    between them from configuration. The cost of that convenience is real and
+    is worth stating - a migration is generated against one provider's type
+    mappings and is not portable to the other, which is exactly the trap
+    Days/day-24 Finding 17 documents in the main solution. Day 6 of this plan
+    is where that has to be answered properly.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.10">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
 </Project>
