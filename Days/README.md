@@ -32,6 +32,7 @@ Quick navigation into each day's brief, code, and evidence. The full narrative (
 | 26 | App Insights + KQL | [`Days/day-26/`](day-26/README.md) |
 | 27 | Security pass: threat model, private endpoints, ZAP | [`Days/day-27/`](day-27/README.md) |
 | 28 | Design review + ADR | [`Days/day-28/`](day-28/README.md) |
+| 29 | Build day 1: EF Core persistence for Curation | [`Days/day-29/`](day-29/README.md) |
 
 Day 6 was a holiday — no exercise that day.
 
