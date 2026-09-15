@@ -8,6 +8,7 @@ using Capstone.Curation.Infrastructure.Outbox;
 using Capstone.SharedKernel;
 using Capstone.Sharing.Application;
 using Capstone.Sharing.Infrastructure;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -17,10 +18,12 @@ var builder = WebApplication.CreateBuilder(args);
 // into AddCurationModule()/AddSharingModule() extension methods owned by each
 // module is the obvious next step and the reason they are already grouped.
 //
-// Everything is a singleton because every store is a dictionary in memory. Real
-// persistence makes the unit of work and the repositories scoped, one per
-// request, for the reason Day 2 set out: a DbContext is a per-request unit of
-// work and is not thread-safe.
+// Catalog and Sharing are still singletons over in-memory dictionaries - their
+// turn is Day 4 of the build plan. Curation is the exception as of Day 1: it
+// now has a real DbContext behind it, and a DbContext is a per-request unit of
+// work and is not thread-safe, so CurationDbContext, the repository and the
+// unit of work are all scoped rather than singleton. The outbox stays
+// singleton - it is still the in-memory scaffold until Day 2.
 // ---------------------------------------------------------------------------
 
 // Catalog - the supplier. Seeded, standing in for the existing quote tables.
@@ -32,15 +35,40 @@ builder.Services.AddSingleton<IQuoteCatalog>(_ => new InMemoryQuoteCatalog(
         [3] = new(3, "Melvin Conway", "Organizations design systems that mirror their own communication structure."),
     }));
 
-// Curation - the core.
+// Curation - the core. Day 1: real EF Core persistence for the aggregate.
+//
+// Provider chosen from configuration, the same way QuotesApi does it and for
+// the same reason: SQLite runs on a laptop with nothing installed, SQL Server
+// is what infra/modules/sql.bicep actually provisions, and neither choice
+// should require editing code. Default is SQLite so that a fresh clone runs
+// without a database engine being present at all - the local SQL Server
+// LocalDB runtime is not installed on every machine, which is how this
+// default got chosen rather than assumed.
+var databaseProvider = builder.Configuration["Database:Provider"] ?? "Sqlite";
+
+var curationConnection = builder.Configuration.GetConnectionString("Curation")
+    ?? throw new InvalidOperationException(
+        "ConnectionStrings:Curation is required - see appsettings.json.");
+
+builder.Services.AddDbContext<CurationDbContext>(options =>
+{
+    if (string.Equals(databaseProvider, "SqlServer", StringComparison.OrdinalIgnoreCase))
+    {
+        options.UseSqlServer(curationConnection);
+    }
+    else
+    {
+        options.UseSqlite(curationConnection);
+    }
+});
+
 builder.Services.AddSingleton<InMemoryOutboxStore>();
 builder.Services.AddSingleton<IOutboxStore>(sp => sp.GetRequiredService<InMemoryOutboxStore>());
-builder.Services.AddSingleton<UnitOfWork>();
-builder.Services.AddSingleton<IUnitOfWork>(sp => sp.GetRequiredService<UnitOfWork>());
-builder.Services.AddSingleton<InMemoryCollectionRepository>();
-builder.Services.AddSingleton<ICollectionRepository>(sp => sp.GetRequiredService<InMemoryCollectionRepository>());
+builder.Services.AddScoped<UnitOfWork>();
+builder.Services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<UnitOfWork>());
+builder.Services.AddScoped<ICollectionRepository, CollectionRepository>();
 builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddSingleton<PublishCollectionHandler>();
+builder.Services.AddScoped<PublishCollectionHandler>();
 
 // Sharing - the subscriber.
 builder.Services.AddSingleton<InMemoryFollowerDirectory>();
