@@ -1,5 +1,3 @@
-using Capstone.Curation.Infrastructure.Outbox;
-
 namespace Capstone.Api;
 
 /// <summary>
@@ -28,13 +26,17 @@ namespace Capstone.Api;
 /// between this and the Service Bus relay from Day 20 is where it reads from,
 /// not how it is driven.
 ///
-/// Known gap, scheduled rather than hidden: <see cref="InMemoryOutboxStore"/>
-/// drains destructively, so a record whose handler throws is gone. The real
-/// outbox marks SentAt only after the broker acknowledges, which is what makes
-/// at-least-once true there and not yet here. Build plan, day 2.
+/// <b>A scope per poll, as of day 2.</b> The outbox is a table now, read
+/// through a scoped <c>CurationDbContext</c>, and a hosted service is a
+/// singleton. Injecting the relay directly would be a captive dependency - the
+/// container would hand this singleton one DbContext to keep for the lifetime
+/// of the process, which is both not thread-safe and a change tracker that
+/// grows until the process restarts. Resolving inside a fresh scope each poll
+/// is also the more faithful shape: the real relay opens a connection, reads a
+/// batch, acknowledges it, and lets go.
 /// </remarks>
 internal sealed class RelayHostedService(
-    InProcessRelay relay,
+    IServiceScopeFactory scopeFactory,
     ILogger<RelayHostedService> logger) : BackgroundService
 {
     /// <summary>
@@ -43,6 +45,15 @@ internal sealed class RelayHostedService(
     /// accidentally synchronous. A reader who queries the feed the instant
     /// publish returns and sees it empty is being shown the design, not a bug.
     /// </summary>
+    /// <remarks>
+    /// Now that the outbox is a table this interval has a cost it did not have
+    /// against a queue: it is a query every 250ms per instance, forever, mostly
+    /// returning nothing. Day 26's dependency breakdown found exactly this
+    /// pattern in the main solution - 366 SQLite calls in half an hour from a
+    /// five-second poll - and it is the strongest argument for day 3 happening
+    /// on schedule rather than being deferred, because a broker is pushed to
+    /// rather than polled.
+    /// </remarks>
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(250);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -51,6 +62,10 @@ internal sealed class RelayHostedService(
         {
             try
             {
+                using var scope = scopeFactory.CreateScope();
+
+                var relay = scope.ServiceProvider.GetRequiredService<InProcessRelay>();
+
                 await relay.DrainAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -61,9 +76,16 @@ internal sealed class RelayHostedService(
             {
                 // A relay that dies on one bad message stops delivering every
                 // later one, which turns a single poison record into a total
-                // outage of the fan-out. Log and stay alive. The real answer is
-                // the dead-letter queue Day 19 built, once this reads a broker.
-                logger.LogError(ex, "Outbox drain failed; the relay will retry on the next poll.");
+                // outage of the fan-out. Log and stay alive.
+                //
+                // As of day 2 this is a retry rather than a loss: the row that
+                // failed is still unsent, so the next poll attempts it again.
+                // Which surfaces the next gap, named here rather than
+                // discovered later - a row that can never succeed is now
+                // retried forever at four attempts a second, and nothing
+                // counts attempts or gives up. The answer is a dead-letter
+                // path, which is what Day 19 built and what day 3 inherits.
+                logger.LogError(ex, "Outbox drain failed; the unsent rows will be retried on the next poll.");
             }
 
             try
