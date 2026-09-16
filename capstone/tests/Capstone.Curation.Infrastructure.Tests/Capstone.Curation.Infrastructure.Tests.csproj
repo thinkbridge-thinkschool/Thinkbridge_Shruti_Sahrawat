@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FluentAssertions" Version="8.10.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.10" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <!--
+    Capstone.Api is referenced because InProcessRelay lives there, and it lives
+    there because the composition root is the only place allowed to know both
+    Curation and Sharing - ModuleBoundaries says so and the architecture tests
+    enforce it. Capstone.ArchitectureTests already references the API from a
+    plain test project for the same kind of reason, so this is an established
+    shape in this solution rather than a new one.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Capstone.Api\Capstone.Api.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Curation\Capstone.Curation.Contracts\Capstone.Curation.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Curation\Capstone.Curation.Domain\Capstone.Curation.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Curation\Capstone.Curation.Infrastructure\Capstone.Curation.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Sharing\Capstone.Sharing.Application\Capstone.Sharing.Application.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Sharing\Capstone.Sharing.Infrastructure\Capstone.Sharing.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>
