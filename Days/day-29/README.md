@@ -48,9 +48,7 @@ instead of the two-save dance Day 20 paid for in `QuotesApi`. Leave this line
 out and nothing fails loudly — the insert succeeds, with a different id than
 the one the handler returned to the caller.
 
-The id that came back from the live run was
-`01a0a49a-6089-7d88-8467-3fd110d95046`. The `7` opening the third group is the
-UUID version field: the domain's Guid v7 survived the round trip intact.
+The walkthrough below shows the id coming back intact, version field and all.
 
 ### Findings
 
@@ -153,21 +151,73 @@ $ dotnet test tests\Capstone.ArchitectureTests
 Test summary: total: 6, failed: 0, succeeded: 6, skipped: 0
 ```
 
-The happy path, against the database rather than a dictionary:
+The happy path, against the database rather than a dictionary. Every response
+piped through `ConvertTo-Json`, because PowerShell renders a sequence of
+differently-shaped objects under the first one's table header and silently
+shows the rest as blank rows - which is how a walkthrough ends up "proving"
+values nobody actually saw:
 
 ```powershell
-$c = Invoke-RestMethod -Method Post http://localhost:5000/api/collections `
-     -Body '{"curatorId":"alice","name":"Distributed Systems Wisdom"}' -ContentType application/json
-# collectionId : 01a0a49a-6089-7d88-8467-3fd110d95046
+PS> $body = @{ curatorId = "alice"; name = "Distributed Systems Wisdom" } | ConvertTo-Json
+PS> $c = Invoke-RestMethod -Method Post http://localhost:5000/api/collections `
+         -Body $body -ContentType application/json
+PS> $c | ConvertTo-Json
+{
+    "collectionId":  "01a0a8f3-4a57-7d56-b197-0f3f7cf94676"
+}
 
-Invoke-RestMethod -Method Post "http://localhost:5000/api/collections/$($c.collectionId)/items" `
-     -Body '{"quoteId":1}' -ContentType application/json
-# items : 1
+PS> Invoke-RestMethod -Method Post "http://localhost:5000/api/collections/$($c.collectionId)/items" `
+         -Body '{"quoteId":1}' -ContentType application/json | ConvertTo-Json
+{
+    "items":  1
+}
 
-Invoke-RestMethod -Method Post "http://localhost:5000/api/collections/$($c.collectionId)/publish" `
-     -Body '{"curatorId":"alice"}' -ContentType application/json
-# published : True
+PS> Invoke-RestMethod -Method Post "http://localhost:5000/api/collections/$($c.collectionId)/publish" `
+         -Body '{"curatorId":"alice"}' -ContentType application/json | ConvertTo-Json
+{
+    "published":  true
+}
 ```
+
+The id is worth one more look: `01a0a8f3-4a57-**7**d56-...`. The `7` opening
+the third group is the UUID version field, so the Guid v7 the domain minted
+is the one the database stored and the one the caller got back - three places
+that would disagree if `ValueGeneratedNever` were missing from the mapping.
+
+### The proof that it is persistence and not memory
+
+Everything above would look identical against the dictionary this day
+replaced. This is the part that would not: the API process is killed, a new
+one is started, and the *same* collection is published again.
+
+```powershell
+PS> Get-Process -Name Capstone.Api | Stop-Process
+PS> dotnet run --project src\Capstone.Api      # a different process, empty memory
+
+PS> try {
+      Invoke-RestMethod -Method Post "http://localhost:5000/api/collections/01a0a8f3-4a57-7d56-b197-0f3f7cf94676/publish" `
+        -Body '{"curatorId":"alice"}' -ContentType application/json
+    } catch {
+      "HTTP " + $_.Exception.Response.StatusCode.value__
+      [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream()).ReadToEnd()
+    }
+
+HTTP 400
+{"error":"This collection is already published."}
+```
+
+Two things are true at once in that response, and only persistence makes both
+true. The row outlived the process that wrote it - against the old in-memory
+store the answer would have been "Collection ... was not found", because the
+dictionary died with the host. And the error is
+`Collection.Publish`'s own invariant, raised against a `Status` and an item
+list that EF materialised from SQLite rows through the value converters,
+which means the aggregate reconstituted from the database is the same
+aggregate that enforced the rule before it was ever saved.
+
+The `try/catch` is not decoration: `Invoke-RestMethod` throws on a 4xx rather
+than returning the body, so without it the message the endpoint deliberately
+returns is the one thing you cannot see.
 
 ### What did you learn this session?
 
