@@ -228,11 +228,56 @@ acknowledgement, which is the entire design in one field.
 
 ### The review
 
-PR: [#8](https://github.com/thinkbridge-thinkschool/Thinkbridge_Shruti_Sahrawat/pull/8)
+- [PR #8](https://github.com/thinkbridge-thinkschool/Thinkbridge_Shruti_Sahrawat/pull/8) — the outbox itself
+- [PR #9](https://github.com/thinkbridge-thinkschool/Thinkbridge_Shruti_Sahrawat/pull/9) — running its tests in CI
 
-<!-- After review: what you changed, and what you defended, with links to the
-     threads. Address or push back with reasoning - a silent force-push that
-     makes a comment disappear is the one response that is never acceptable. -->
+**Where the review actually came from, stated plainly.** Copilot code review is
+not enabled on this organisation, and the mentor's pass runs on a weekly cycle,
+so neither PR carries a GitHub review thread yet. Both have a review requested
+and this section will carry that exchange when it lands. What follows is the
+feedback this work did receive — from paired review during the session — and it
+is labelled as that rather than dressed up as something it was not. Day 28 took
+the same position about its own critique, for the same reason: a review whose
+source is misdescribed is worth less than no review.
+
+**Changed — the drain's query could not run on the default provider.** The
+first review point was that `ReadUnsentAsync` orders by `OccurredAt`, a
+`DateTimeOffset`, which SQLite refuses to translate in an `ORDER BY`. Four of
+the five new tests failed on it. Changed rather than argued: `OccurredAt` now
+persists as UTC ticks through a value converter. The reasoning went into the
+mapping rather than the commit message alone, because the *next* person to add
+a timestamp column to this table needs it at the point they are typing.
+
+**Changed — a new test project that CI never ran.** PR #8 added
+`Capstone.Curation.Infrastructure.Tests` and did not add it to `ci.yml`'s
+capstone matrix, so the five tests that are the entire evidence for this day
+passed locally while CI reported green on a suite that did not contain them.
+Raised after PR #8 had already merged; fixed in [PR #9](https://github.com/thinkbridge-thinkschool/Thinkbridge_Shruti_Sahrawat/pull/9)
+rather than quietly amended onto the first one, which would have rewritten
+history that was already on `main`.
+
+**Defended — the CI matrix stays an explicit list, not a glob.** The obvious
+response to the gap above is `capstone/tests/*`, so it cannot happen again.
+Pushed back, and the argument is the one this repository already makes
+elsewhere: `ModuleBoundaries.Allowed` is a hand-maintained table precisely so
+that widening the graph is a decision somebody takes rather than a thing that
+happens. A glob applies the opposite default to CI, and would silently enrol
+any future project — including one written to demonstrate a failure — into the
+gate.
+
+The counter-argument is real and is recorded rather than dismissed: a boundary
+table defends against deliberate mistakes, a CI matrix defends against
+*forgetting*, and those two want opposite defaults. The position taken here is
+that the forgetting is visible (a missing job on the run page) while a glob's
+over-inclusion is not, so the failure mode of the explicit list is the one that
+gets noticed. The comment added to `ci.yml` names the cost in full, so a
+reviewer who disagrees is arguing with a stated position rather than
+discovering an accident.
+
+**What was not done, and matters as much:** nothing was force-pushed. PR #8
+stayed exactly as merged, and the correction landed as its own commit with its
+own reasoning — because a review comment that a force-push makes disappear is a
+conversation someone had and can no longer point at.
 
 ### What did you learn this session?
 
