@@ -107,6 +107,22 @@ here the absence of one gives Production when Development was wanted. Both
 are the same lesson — the environment a process runs in is decided by files
 and variables that are easy to not know about.
 
+### The commit log for the day
+
+```
+$ git log --oneline 624ea36..HEAD
+
+1bab0c1  Merge remote-tracking branch 'origin/main' into dev
+a468bdc  Write up Day 29 - build day 1, EF Core persistence for Curation
+09fbbce  Add the InitialCreate migration for Collections and CollectionItems
+136b7f1  Give the Curation aggregate real EF Core persistence
+```
+
+Three commits of work and one merge, in the order the exercise asks for them:
+the mapping and the wiring first, the generated migration on its own so the
+hand-written change and the tool-written one can be reviewed separately, then
+the write-up. Opened as [PR #5](https://github.com/thinkbridge-thinkschool/Thinkbridge_Shruti_Sahrawat/pull/5).
+
 ### Proof
 
 ```
