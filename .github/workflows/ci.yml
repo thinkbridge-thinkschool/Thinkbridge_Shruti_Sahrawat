@@ -84,6 +84,7 @@ jobs:
         project:
           - capstone/tests/Capstone.Curation.Domain.Tests
           - capstone/tests/Capstone.ArchitectureTests
+          - capstone/tests/Capstone.Curation.Infrastructure.Tests
 
     steps:
       - uses: actions/checkout@v4
