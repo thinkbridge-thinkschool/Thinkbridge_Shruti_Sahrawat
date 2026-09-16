@@ -19,11 +19,11 @@ var builder = WebApplication.CreateBuilder(args);
 // module is the obvious next step and the reason they are already grouped.
 //
 // Catalog and Sharing are still singletons over in-memory dictionaries - their
-// turn is Day 4 of the build plan. Curation is the exception as of Day 1: it
-// now has a real DbContext behind it, and a DbContext is a per-request unit of
-// work and is not thread-safe, so CurationDbContext, the repository and the
-// unit of work are all scoped rather than singleton. The outbox stays
-// singleton - it is still the in-memory scaffold until Day 2.
+// turn is day 4 of the build plan. Curation is persisted: a DbContext is a
+// per-request unit of work and is not thread-safe, so the context, the
+// repository, the outbox store and the unit of work are all scoped. As of
+// day 2 that includes the relay, because the outbox it reads is a table
+// behind that same scoped context.
 // ---------------------------------------------------------------------------
 
 // Catalog - the supplier. Seeded, standing in for the existing quote tables.
@@ -36,6 +36,8 @@ builder.Services.AddSingleton<IQuoteCatalog>(_ => new InMemoryQuoteCatalog(
     }));
 
 // Curation - the core. Day 1: real EF Core persistence for the aggregate.
+// Day 2: the outbox is a table in the same context, so one SaveChanges commits
+// the state change and the announcement together.
 //
 // Provider chosen from configuration, the same way QuotesApi does it and for
 // the same reason: SQLite runs on a laptop with nothing installed, SQL Server
@@ -62,8 +64,7 @@ builder.Services.AddDbContext<CurationDbContext>(options =>
     }
 });
 
-builder.Services.AddSingleton<InMemoryOutboxStore>();
-builder.Services.AddSingleton<IOutboxStore>(sp => sp.GetRequiredService<InMemoryOutboxStore>());
+builder.Services.AddScoped<IOutboxStore, EfOutboxStore>();
 builder.Services.AddScoped<UnitOfWork>();
 builder.Services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<UnitOfWork>());
 builder.Services.AddScoped<ICollectionRepository, CollectionRepository>();
@@ -81,7 +82,11 @@ builder.Services.AddSingleton<CollectionPublishedHandler>();
 // The stand-in for Day 20's relay process, and the background loop that drives
 // it. The loop is what keeps the drain off the request path - see
 // RelayHostedService for why that is a correctness property and not tidiness.
-builder.Services.AddSingleton<Capstone.Api.InProcessRelay>();
+//
+// The relay is scoped, not singleton: it reads the outbox table through the
+// scoped DbContext, and RelayHostedService resolves it inside a fresh scope
+// on every poll rather than capturing one for the life of the process.
+builder.Services.AddScoped<Capstone.Api.InProcessRelay>();
 builder.Services.AddHostedService<Capstone.Api.RelayHostedService>();
 
 var app = builder.Build();
@@ -174,6 +179,28 @@ app.MapPost("/api/follows", (FollowRequest request, InMemoryFollowerDirectory di
 
 app.MapGet("/api/feed/{followerId}", (string followerId, InMemoryFeedWriter feed)
     => Results.Ok(feed.FeedFor(followerId)));
+
+// Day 2. The outbox is a table now, so "has the announcement been delivered
+// yet" is a question with an answer, and one worth being able to ask from
+// outside the process - the walkthrough in Days/day-30 uses exactly this to
+// show a row unsent and then sent rather than asserting it happened.
+//
+// Read-only and unauthenticated, which is fine here and would not be in the
+// real thing: Day 27's diagnostics gate is the pattern for that, and this
+// endpoint belongs behind it the moment this scaffold has anything worth
+// gating.
+app.MapGet("/api/outbox", async (CurationDbContext db, CancellationToken cancellationToken) =>
+    Results.Ok(await db.OutboxMessages
+        .OrderBy(message => message.OccurredAt)
+        .Select(message => new
+        {
+            message.MessageId,
+            message.EventType,
+            message.OccurredAt,
+            message.SentAt,
+            delivered = message.SentAt != null,
+        })
+        .ToListAsync(cancellationToken)));
 
 app.Run();
 

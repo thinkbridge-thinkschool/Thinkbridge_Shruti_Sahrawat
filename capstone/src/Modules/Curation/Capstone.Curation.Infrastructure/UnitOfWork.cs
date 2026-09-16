@@ -5,22 +5,33 @@ using Capstone.Curation.Infrastructure.Outbox;
 namespace Capstone.Curation.Infrastructure;
 
 /// <summary>
-/// Commits tracked aggregates and the outbox rows their events produced, as one
-/// unit.
+/// Commits tracked aggregates and the outbox rows their events produced, as
+/// one unit.
 /// </summary>
 /// <remarks>
-/// Day 1 of the build plan: the aggregate side of this is now real -
-/// SaveChangesAsync against SQL rather than a dictionary assignment. The
-/// outbox side stays in-memory until Day 2 builds the real table, so "one
-/// transaction" is not fully true yet for the outbox row specifically - it is
-/// true for the aggregate's own state, which is what this day set out to
-/// prove. Making the outbox itself transactional is deliberately left for
-/// Day 2 rather than folded in here, so each day lands with the tests green
-/// and one clear thing changed.
+/// As of day 2 of the build plan this is finally true rather than aspirational.
+/// The sequence has not changed since the scaffold -
 ///
-/// No separate Track() list any more - the DbContext's own change tracker is
-/// the list. Everything CollectionRepository loaded or added in this request
-/// is already in it, because both operations went through the same scoped
+/// <list type="number">
+/// <item>drain every tracked aggregate's domain events;</item>
+/// <item>translate each into an outbox record;</item>
+/// <item>clear the aggregate's events so a second commit cannot republish
+/// them;</item>
+/// <item>persist state and outbox rows in a single transaction.</item>
+/// </list>
+///
+/// - but step 4 only became real when the outbox became a table in the same
+/// DbContext. Yesterday <c>outbox.Enqueue</c> pushed onto an in-memory queue
+/// that was not part of any transaction, so a <c>SaveChangesAsync</c> that
+/// threw left an announcement staged for a state change that had not
+/// happened. Today <c>Enqueue</c> adds a row to the same change tracker, and
+/// the single save below either writes the collection and its outbox row or
+/// writes neither. The ordering of the two lines stopped mattering, which is
+/// the sign the gap actually closed rather than moved.
+///
+/// No separate Track() list - the DbContext's own change tracker is the list.
+/// Everything CollectionRepository loaded or added in this request is already
+/// in it, because both operations went through the same scoped
 /// CurationDbContext instance.
 /// </remarks>
 public sealed class UnitOfWork(CurationDbContext db, IOutboxStore outbox) : IUnitOfWork
@@ -47,14 +58,6 @@ public sealed class UnitOfWork(CurationDbContext db, IOutboxStore outbox) : IUni
             aggregate.ClearDomainEvents();
         }
 
-        // Named honestly rather than hidden: outbox.Enqueue above already ran
-        // before this line, so if SaveChangesAsync throws - a constraint
-        // violation, a dropped connection - the in-memory outbox has staged
-        // an event for a state change that did not actually persist. That is
-        // exactly the gap a real outbox closes by writing the row in the same
-        // transaction as the state change, which is Day 2's job, not this
-        // day's. Today's scope is proving the aggregate's own state is real
-        // SQL; the outbox becoming equally real is the very next commit.
         await db.SaveChangesAsync(cancellationToken);
 
         return staged;
