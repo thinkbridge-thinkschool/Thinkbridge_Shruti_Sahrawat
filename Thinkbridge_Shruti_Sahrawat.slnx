@@ -17,6 +17,8 @@
   <Project Path="capstone/src/Modules/Curation/Capstone.Curation.Infrastructure/Capstone.Curation.Infrastructure.csproj" />
   <Project Path="capstone/src/Modules/Sharing/Capstone.Sharing.Application/Capstone.Sharing.Application.csproj" />
   <Project Path="capstone/src/Modules/Sharing/Capstone.Sharing.Infrastructure/Capstone.Sharing.Infrastructure.csproj" />
+  <Project Path="capstone/tests/Capstone.Api.Tests/Capstone.Api.Tests.csproj" />
   <Project Path="capstone/tests/Capstone.ArchitectureTests/Capstone.ArchitectureTests.csproj" />
   <Project Path="capstone/tests/Capstone.Curation.Domain.Tests/Capstone.Curation.Domain.Tests.csproj" />
+  <Project Path="capstone/tests/Capstone.Curation.Infrastructure.Tests/Capstone.Curation.Infrastructure.Tests.csproj" />
 </Solution>

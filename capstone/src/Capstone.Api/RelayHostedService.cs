@@ -37,6 +37,7 @@ namespace Capstone.Api;
 /// </remarks>
 internal sealed class RelayHostedService(
     IServiceScopeFactory scopeFactory,
+    IConfiguration configuration,
     ILogger<RelayHostedService> logger) : BackgroundService
 {
     /// <summary>
@@ -54,10 +55,40 @@ internal sealed class RelayHostedService(
     /// on schedule rather than being deferred, because a broker is pushed to
     /// rather than polled.
     /// </remarks>
-    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(250);
+    public const int DefaultPollIntervalMilliseconds = 250;
+
+    /// <summary>
+    /// <c>Relay:PollIntervalMilliseconds</c>, defaulting to
+    /// <see cref="DefaultPollIntervalMilliseconds"/>.
+    /// </summary>
+    /// <remarks>
+    /// Read from configuration as of day 31, and not only so the tests can
+    /// change it. A poll interval is an operational dial: the right value
+    /// depends on how much delivery lag a feed can tolerate against how much a
+    /// mostly-empty query every quarter second costs, and both of those are
+    /// properties of a deployment rather than of this code. Hard-coding it
+    /// meant the only way to answer "what if we polled every two seconds in
+    /// production" was a rebuild.
+    ///
+    /// What the tests get for free is the reason it is <i>noticed</i> here.
+    /// Capstone.Api.Tests sets an hour, which parks the relay after its first
+    /// drain so that an endpoint test can assert a row is still unsent without
+    /// racing a background thread; the one end-to-end test sets 100ms so the
+    /// fan-out it is actually about does not take a quarter of a second to
+    /// start. Neither needed a flag that only exists under test.
+    ///
+    /// Bound at construction rather than re-read each pass. A value that could
+    /// change mid-loop reads as a feature and is really just a timing question
+    /// nobody has asked - and this service is restarted by every deploy anyway.
+    /// </remarks>
+    private readonly TimeSpan _pollInterval = TimeSpan.FromMilliseconds(
+        Math.Max(1, configuration.GetValue("Relay:PollIntervalMilliseconds", DefaultPollIntervalMilliseconds)));
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        logger.LogInformation(
+            "Outbox relay started; polling every {PollIntervalMs}ms.", _pollInterval.TotalMilliseconds);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -90,7 +121,7 @@ internal sealed class RelayHostedService(
 
             try
             {
-                await Task.Delay(PollInterval, stoppingToken);
+                await Task.Delay(_pollInterval, stoppingToken);
             }
             catch (OperationCanceledException)
             {

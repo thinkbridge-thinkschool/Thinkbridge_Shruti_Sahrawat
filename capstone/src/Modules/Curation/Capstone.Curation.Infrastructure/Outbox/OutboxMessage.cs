@@ -17,6 +17,18 @@ namespace Capstone.Curation.Infrastructure.Outbox;
 /// so a handler that throws leaves a row that is still unsent, and the next
 /// poll finds it again. That is the difference between claiming at-least-once
 /// and providing it.
+///
+/// <b>What this type deliberately is not, as of day 31.</b> It had two methods
+/// that no longer have callers, and both are gone. <c>MarkSent</c> stopped
+/// being used when EfOutboxStore started stamping a whole batch with one
+/// UPDATE instead of loading each row to mutate it - see that method for the
+/// measurement that prompted it. <c>ToRecord</c> had no caller before today
+/// either; the read path projects straight to <see cref="OutboxRecord"/> in
+/// the query, precisely so the relay never holds one of these.
+///
+/// So this is a row, not an entity with behaviour, and it now looks like one.
+/// An entity method nothing calls is not encapsulation - it is a comment that
+/// compiles, and it misleads the next reader about where a field is written.
 /// </remarks>
 public sealed class OutboxMessage
 {
@@ -44,6 +56,13 @@ public sealed class OutboxMessage
     /// Null until a subscriber has accepted it. The relay's only query is
     /// "where this is null, oldest first".
     /// </summary>
+    /// <remarks>
+    /// Written by <c>EfOutboxStore.MarkSentAsync</c> as a bulk UPDATE, which
+    /// does not go through this property at all. The private setter is still
+    /// right: it stops anything in this process from stamping a row without
+    /// going through the store, and the store is the only place the
+    /// deliver-then-acknowledge ordering is enforced.
+    /// </remarks>
     public DateTimeOffset? SentAt { get; private set; }
 
     public static OutboxMessage Stage(OutboxRecord record) => new()
@@ -54,8 +73,4 @@ public sealed class OutboxMessage
         OccurredAt = record.OccurredAt,
         SentAt = null,
     };
-
-    public void MarkSent(DateTimeOffset sentAt) => SentAt = sentAt;
-
-    public OutboxRecord ToRecord() => new(MessageId, EventType, Payload, OccurredAt);
 }

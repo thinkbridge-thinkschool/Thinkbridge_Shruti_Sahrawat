@@ -34,6 +34,7 @@ Quick navigation into each day's brief, code, and evidence. The full narrative (
 | 28 | Design review + ADR | [`Days/day-28/`](day-28/README.md) |
 | 29 | Build day 1: EF Core persistence for Curation | [`Days/day-29/`](day-29/README.md) |
 | 30 | Build day 2: a real outbox table, non-destructive drain | [`Days/day-30/`](day-30/README.md) |
+| 31 | Polish: tests at every layer, a measured perf pass, a security re-check | [`Days/day-31/`](day-31/README.md) |
 
 Day 6 was a holiday — no exercise that day.
 
@@ -43,3 +44,4 @@ Day 6 was a holiday — no exercise that day.
 - [Concept cards](reference/concept-cards.md)
 - [Bugs these tests caught](reference/bugs-caught.md)
 - [Running it](reference/running-it.md)
+- [Capstone perf: the publish path under load](../capstone/perf/README.md)
