@@ -80,20 +80,21 @@ the one running in production.
 
 ### Coverage at each layer
 
-Merged across the three suites that execute application code, using
-`capstone/coverlet.runsettings`:
+From the `Capstone coverage gate` job on
+[CI run #155](https://github.com/thinkbridge-thinkschool/Thinkbridge_Shruti_Sahrawat/actions/runs/35184446100),
+printed into the run summary:
 
 ```
-$ python scripts\check-coverage.py --by-project 0 @reports
+Capstone coverage, by layer
 
-Reports merged:  3
+Reports merged:  6
 Files:           17
-Lines covered:   453 / 469
-Line coverage:   96.59%
+Lines covered:   451 / 469
+Line coverage:   96.16%   (threshold 90%)
 
 Coverage by project:
   project                           covered  total     rate
-  Capstone.Api                          149    156   95.51%
+  Capstone.Api                          147    156   94.23%
   Capstone.Catalog.Infrastructure         2      7   28.57%
   Capstone.Curation.Application          14     14  100.00%
   Capstone.Curation.Domain               61     64   95.31%
@@ -101,9 +102,23 @@ Coverage by project:
   Capstone.SharedKernel                   6      6  100.00%
   Capstone.Sharing.Application            9      9  100.00%
   Capstone.Sharing.Infrastructure        14     14  100.00%
+
+Coverage gate passed: 96.16% >= 90%
 ```
 
-**96.59% is the number that hides the finding.** `Capstone.Catalog.Infrastructure`
+**The same suite measured 96.59% locally, and the difference is worth keeping.**
+451 lines on the runner against 453 on a laptop, and the whole gap is in
+`RelayHostedService` — 5 uncovered there in CI, 3 locally. That is a
+`BackgroundService`: how many of its lines execute depends on how many poll
+iterations happen before the test host shuts down, which is a property of the
+machine's timing rather than of the code. Coverage of a background loop is not
+reproducible to the line across machines.
+
+That is the argument for the gate sitting at 90% rather than at the
+measurement. A threshold pinned to 96.59% would have failed this run — on a
+runner that did nothing wrong, testing code that had not changed.
+
+**96.16% is the number that hides the finding.** `Capstone.Catalog.Infrastructure`
 is at 28.57% — five of its seven lines never execute. Catalog is the one module
 nothing in the pyramid reaches: it has no test project of its own, and the only
 thing that touches it is `FindMissingAsync` on the publish happy path. It is
@@ -114,7 +129,7 @@ that.
 
 The gap is not closed by writing a test for a seeded dictionary. It is recorded
 because "the scaffold module is untested" is a true and useful statement, and
-"96.59%" is a true and useless one.
+"96.16%" is a true and useless one.
 
 `--by-project` was added to `scripts/check-coverage.py` for exactly this. It
 changes output only — the gate is still the merged figure, because a per-project
@@ -425,10 +440,38 @@ acknowledged on an idle system. One poll interval plus scheduling.
 
 ---
 
+### The CI run
+
+[Run #155](https://github.com/thinkbridge-thinkschool/Thinkbridge_Shruti_Sahrawat/actions/runs/35184446100),
+green in 1m45s, nine jobs:
+
+```
+OrderRefactor.Tests                                 Coverage gate          87.54% >= 80%
+Quotes.Tests.Unit
+Quotes.Tests.Integration
+
+Capstone (Capstone.Curation.Domain.Tests)           Capstone coverage gate 96.16% >= 90%
+Capstone (Capstone.ArchitectureTests)
+Capstone (Capstone.Curation.Infrastructure.Tests)
+Capstone (Capstone.Api.Tests)
+```
+
+The root gate is unchanged at 87.54%, which is the correct outcome: nothing
+this day touched is inside its `[QuotesApi]*,[OrderRefactor]*` allowlist, so a
+movement there would have meant something had gone wrong.
+
+`Capstone (Capstone.ArchitectureTests)` runs with the coverage collector flag
+and has no `coverlet.collector` package, because it reads `.csproj` XML and
+reflects over assembly references rather than executing application code. It
+produces a `.trx` and no coverage report, which is why the upload step for the
+capstone legs uses `if-no-files-found: warn` where the `test` job above uses
+`error`. That leg passing was the one thing about this workflow change that
+could not be checked before pushing it.
+
 ### What did you learn this session?
 
 A merged coverage percentage and a p99 both average away the thing you needed
-to see — 96.59% hid a module at 28.57%, and the p99 hid the fact that three
+to see — 96.16% hid a module at 28.57%, and the p99 hid the fact that three
 quarters of the tail was never the component being fixed.
 
 ### What would break this?
