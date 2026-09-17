@@ -49,11 +49,33 @@ public interface IOutboxStore
     Task<IReadOnlyList<OutboxRecord>> ReadUnsentAsync(int maxCount, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Stamps a record as delivered. Idempotent: marking an already-marked or
+    /// Stamps records as delivered. Idempotent: marking an already-marked or
     /// unknown record is not an error, because a relay that crashed between
     /// delivering and acknowledging will legitimately try again.
     /// </summary>
-    Task MarkSentAsync(Guid messageId, CancellationToken cancellationToken);
+    /// <remarks>
+    /// <b>A set rather than one id, as of day 31, and the reason is measured.</b>
+    /// This used to take a single <c>Guid</c> and the relay called it once per
+    /// delivered message, which meant twenty separate write transactions per
+    /// drain. SQLite permits one writer at a time, so each of those queued
+    /// behind whatever request traffic was in flight: under 10 concurrent
+    /// publishers the p95 of the publish endpoint was 153.73ms with the relay
+    /// running and 7.80ms with it parked. The relay's acknowledgements were
+    /// twenty times more of the tail than the work they recorded.
+    ///
+    /// Taking the whole set lets the implementation acknowledge a drain in one
+    /// statement. The behaviour that has to survive the change is the ordering
+    /// - deliver, then acknowledge - and it does: the relay calls this after
+    /// the subscribers have accepted, never before.
+    ///
+    /// What does change is the crash window. Previously a process that died
+    /// mid-batch had acknowledged the messages it had already delivered; now it
+    /// has not, so the whole batch redelivers. That is still at-least-once, it
+    /// is still absorbed by the same (MessageId, consumer) dedup that was
+    /// always required, and it is a wider window than before. Named here rather
+    /// than left for somebody to find in a duplicate feed entry.
+    /// </remarks>
+    Task MarkSentAsync(IReadOnlyCollection<Guid> messageIds, CancellationToken cancellationToken);
 }
 
 /// <param name="MessageId">

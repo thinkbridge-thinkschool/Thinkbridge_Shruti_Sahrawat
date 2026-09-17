@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Coverage configuration for the capstone, and separate from the one at the
+  repository root on purpose.
+
+  The root file's <Include> is an allowlist - [QuotesApi]*,[OrderRefactor]* -
+  so pointing the capstone jobs at it would have produced an empty report and a
+  coverage number that looked like a bug. Adding the capstone assemblies to it
+  instead would have been worse: the root gate is one merged percentage across
+  the main solution, and quietly folding a second application into it changes
+  what that number has meant since Day 4 without anybody choosing to.
+
+  Two applications, two numbers. Day 22 made the same call for the same reason
+  and skipped capstone coverage altogether; this day keeps the separation and
+  drops the skipping.
+-->
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat code coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+
+          <!--
+            Every production assembly in the capstone, and the reason the
+            filter is a wildcard here while the root file lists two assemblies
+            by name: this is a modular monolith whose whole point is that
+            modules get added. A named list would mean the first person to add
+            a module silently drops it out of coverage - which is the exact
+            failure Day 30 hit with the CI matrix, one file over.
+          -->
+          <Include>[Capstone.*]*</Include>
+
+          <!--
+            The test assemblies match the include above, since they are called
+            Capstone.*.Tests. A test project covering itself is a number that
+            rises when you write tests for your tests.
+
+            EF Core's generated migrations, designer files and model snapshot
+            are excluded for the reason the root file spells out at length:
+            they are machine-written, nobody reviews them line by line, and
+            counting roughly 400 lines of them as untested application code
+            measures the scaffolder rather than the work.
+          -->
+          <Exclude>[Capstone.*.Tests]*,[*]*.Migrations.*</Exclude>
+
+          <ExcludeByFile>**/Migrations/*.cs,**/Migrations/**/*.cs</ExcludeByFile>
+
+          <ExcludeByAttribute>GeneratedCodeAttribute,CompilerGeneratedAttribute,ExcludeFromCodeCoverageAttribute</ExcludeByAttribute>
+
+          <!--
+            Auto-property accessors are compiler-generated one-liners with no
+            branch and no behaviour. This codebase is full of them - every
+            value object and every record - so leaving them in would inflate
+            the number without a single test being written, which is the same
+            distortion the root file rejects, and larger here.
+          -->
+          <SkipAutoProps>true</SkipAutoProps>
+
+          <UseSourceLink>false</UseSourceLink>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

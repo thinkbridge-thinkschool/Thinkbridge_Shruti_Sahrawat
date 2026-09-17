@@ -10,6 +10,7 @@ env:
   DOTNET_NOLOGO: 'true'
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
   COVERAGE_THRESHOLD: '80'
+  CAPSTONE_COVERAGE_THRESHOLD: '90'
 
 jobs:
   # One leg per test project. fail-fast is off so a break in one suite still
@@ -60,31 +61,54 @@ jobs:
             ${{ matrix.project }}/TestResults/**/coverage.cobertura.xml
           if-no-files-found: error
 
-  # Day 22 capstone. A separate job rather than a fourth matrix leg, and
-  # deliberately without --collect:"XPlat Code Coverage", so it produces no
-  # coverage-* artifact and cannot reach the gate below.
+  # Day 22 capstone, one leg per test project.
   #
-  # Two reasons it stays out of the 80% union. The coverage <Include> filter in
-  # coverlet.runsettings is an allowlist - [QuotesApi]*,[OrderRefactor]* - so a
-  # capstone report would be empty anyway. And a kickoff scaffold is mostly
-  # seams by design: counting its in-memory stubs against a threshold Day 4
-  # worked hard to make honest would corrupt the number in the direction that
-  # is hardest to notice, by making it easy to hit.
+  # It stays a separate job from `test` above, and its coverage stays a
+  # separate number from the 80% union, because these are two applications.
+  # The root coverlet.runsettings has an allowlist Include of
+  # [QuotesApi]*,[OrderRefactor]*, so a capstone report gathered against it
+  # would be empty; folding the capstone assemblies into that allowlist instead
+  # would silently change what the root percentage has meant since Day 4.
+  # capstone/coverlet.runsettings is the second configuration and
+  # CAPSTONE_COVERAGE_THRESHOLD is the second number.
   #
-  # What this job does gate is the thing that matters for a modular monolith:
-  # Capstone.ArchitectureTests fails if any module references another module's
-  # internals, so the boundaries are enforced on every push rather than in code
-  # review.
+  # What Day 22 decided and Day 31 reversed: this job used to run without
+  # coverage at all, on the grounds that a kickoff scaffold is mostly seams and
+  # counting its in-memory stubs would corrupt a threshold that Day 4 worked
+  # hard to make honest. That was right for a scaffold and stopped being right
+  # once the scaffold had a domain, a persisted aggregate, an outbox and a
+  # relay with forty tests around them.
+  #
+  # The project list is explicit rather than a glob, and that choice has now
+  # cost something once. Day 30 added Capstone.Curation.Infrastructure.Tests
+  # and did not add it here, so the five tests that are the entire evidence for
+  # that day's non-destructive drain ran on a laptop and nowhere else - while
+  # CI reported green on a suite that did not contain them. A green check on an
+  # incomplete suite is worse than a red one, because it is trusted.
+  #
+  # The list stays explicit anyway, for the same reason ModuleBoundaries.Allowed
+  # is a table rather than a convention: adding a project to CI should be a
+  # decision somebody makes, not a thing that happens silently. The cost of that
+  # position is exactly the failure above, and it is recorded here rather than
+  # papered over with a wildcard.
+  #
+  # `name` and `path` are separate as of Day 31 only because an artifact name
+  # cannot contain a slash.
   capstone:
-    name: Capstone (${{ matrix.project }})
+    name: Capstone (${{ matrix.name }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        project:
-          - capstone/tests/Capstone.Curation.Domain.Tests
-          - capstone/tests/Capstone.ArchitectureTests
-          - capstone/tests/Capstone.Curation.Infrastructure.Tests
+        include:
+          - name: Capstone.Curation.Domain.Tests
+            path: capstone/tests/Capstone.Curation.Domain.Tests
+          - name: Capstone.ArchitectureTests
+            path: capstone/tests/Capstone.ArchitectureTests
+          - name: Capstone.Curation.Infrastructure.Tests
+            path: capstone/tests/Capstone.Curation.Infrastructure.Tests
+          - name: Capstone.Api.Tests
+            path: capstone/tests/Capstone.Api.Tests
 
     steps:
       - uses: actions/checkout@v4
@@ -94,13 +118,34 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Restore
-        run: dotnet restore ${{ matrix.project }}
+        run: dotnet restore ${{ matrix.path }}
 
       - name: Build
-        run: dotnet build ${{ matrix.project }} --no-restore --configuration Release
+        run: dotnet build ${{ matrix.path }} --no-restore --configuration Release
 
       - name: Test
-        run: dotnet test ${{ matrix.project }} --no-build --configuration Release
+        run: >
+          dotnet test ${{ matrix.path }}
+          --no-build --configuration Release
+          --logger "trx;LogFileName=test-results.trx"
+          --collect:"XPlat Code Coverage"
+          --settings capstone/coverlet.runsettings
+          --results-directory ${{ matrix.path }}/TestResults
+
+      - name: Upload test results and coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capstone-coverage-${{ matrix.name }}
+          path: |
+            ${{ matrix.path }}/TestResults/**/*.trx
+            ${{ matrix.path }}/TestResults/**/coverage.cobertura.xml
+          # Capstone.ArchitectureTests produces no coverage report: it reads
+          # .csproj XML and reflects over assembly references rather than
+          # executing application code, so there is nothing for the collector
+          # to instrument. warn, not error - the absence is expected here and
+          # would be a real problem in the `test` job above.
+          if-no-files-found: warn
 
   # The gate runs once, on the union of all three reports. Gating each project
   # separately asks the unit suite to cover Program.cs, which it never executes -
@@ -150,4 +195,71 @@ jobs:
         with:
           name: coverage-summary
           path: coverage-summary.txt
+          if-no-files-found: warn
+
+  # Day 31. The capstone's own gate, reported per layer.
+  #
+  # --by-project is there because this day's exercise asked for coverage at
+  # each layer and one merged percentage cannot answer that. The first run of
+  # it was the argument for it: 96.15% merged, with Catalog at 28.57% - the one
+  # module nothing in the pyramid reaches, invisible behind a number that
+  # looked excellent.
+  #
+  # The gate itself is still the merged figure, deliberately. A per-project
+  # threshold fails a project the day it is created and before anybody could
+  # have written a test for it, which teaches people to write a token test
+  # rather than a useful one. The breakdown is there to be read; the number is
+  # there to be passed.
+  #
+  # 90% against a measured 96.59%. Not set at the measurement: a gate pinned to
+  # today's figure fails on the next honest commit and gets lowered by whoever
+  # is unlucky, which is how a threshold stops meaning anything. Six points of
+  # headroom is room to add a module before the gate has an opinion, and not so
+  # much room that the suite could rot quietly.
+  capstone-coverage:
+    name: Capstone coverage gate
+    runs-on: ubuntu-latest
+    needs: capstone
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download coverage from every capstone test project
+        uses: actions/download-artifact@v4
+        with:
+          pattern: capstone-coverage-*
+          path: capstone-coverage-artifacts
+
+      - name: Merge reports, report per layer, enforce the threshold
+        run: |
+          set -euo pipefail
+          mapfile -t reports < <(find capstone-coverage-artifacts -name 'coverage.cobertura.xml' | sort)
+          if [ ${#reports[@]} -eq 0 ]; then
+            echo "::error::No capstone coverage reports were downloaded"
+            exit 1
+          fi
+          printf 'Found %d report(s):\n' "${#reports[@]}"
+          printf '  %s\n' "${reports[@]}"
+          echo
+          python3 scripts/check-coverage.py --by-project \
+            "$CAPSTONE_COVERAGE_THRESHOLD" "${reports[@]}" \
+            | tee capstone-coverage-summary.txt
+
+      - name: Publish the summary on the run page
+        if: always()
+        run: |
+          {
+            echo '## Capstone coverage, by layer'
+            echo
+            echo '```'
+            cat capstone-coverage-summary.txt 2>/dev/null || echo 'No summary produced.'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the merged summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capstone-coverage-summary
+          path: capstone-coverage-summary.txt
           if-no-files-found: warn

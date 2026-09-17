@@ -8,12 +8,19 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Day 31. See the note in Capstone.Curation.Domain.Tests.csproj. -->
+    <!--
+      coverlet.collector is what makes the XPlat Code Coverage collector
+      produce a report rather than silently nothing. Day 31 added it to all
+      three capstone test projects: before that the capstone jobs ran without
+      coverage at all, which was a deliberate choice on day 22 and stopped
+      being one the moment this day's exercise asked for coverage per layer.
+    -->
     <PackageReference Include="coverlet.collector" Version="10.0.1">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="FluentAssertions" Version="8.10.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.10" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.10" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
@@ -25,20 +32,20 @@
   </ItemGroup>
 
   <!--
-    Capstone.Api is referenced because InProcessRelay lives there, and it lives
-    there because the composition root is the only place allowed to know both
-    Curation and Sharing - ModuleBoundaries says so and the architecture tests
-    enforce it. Capstone.ArchitectureTests already references the API from a
-    plain test project for the same kind of reason, so this is an established
-    shape in this solution rather than a new one.
+    Two references and no more. Capstone.Api is the system under test;
+    Capstone.Curation.Infrastructure is here because the factory has to
+    re-register CurationDbContext against a test database, which means naming
+    the type.
+
+    Nothing here references a module's Application or Domain assembly. That is
+    on purpose and is the difference between this project and the two below it
+    in the pyramid: these tests may only say what an HTTP client could say. A
+    test that reached into Collection to assert an invariant would be a domain
+    test paying the price of booting a web host.
   -->
   <ItemGroup>
     <ProjectReference Include="..\..\src\Capstone.Api\Capstone.Api.csproj" />
-    <ProjectReference Include="..\..\src\Modules\Curation\Capstone.Curation.Contracts\Capstone.Curation.Contracts.csproj" />
-    <ProjectReference Include="..\..\src\Modules\Curation\Capstone.Curation.Domain\Capstone.Curation.Domain.csproj" />
     <ProjectReference Include="..\..\src\Modules\Curation\Capstone.Curation.Infrastructure\Capstone.Curation.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\src\Modules\Sharing\Capstone.Sharing.Application\Capstone.Sharing.Application.csproj" />
-    <ProjectReference Include="..\..\src\Modules\Sharing\Capstone.Sharing.Infrastructure\Capstone.Sharing.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

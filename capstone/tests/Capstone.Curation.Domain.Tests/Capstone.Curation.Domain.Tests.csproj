@@ -8,6 +8,21 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!--
+      Day 31. Without this package the XPlat Code Coverage collector produces
+      nothing at all and says so only in a line nobody reads, which is how the
+      capstone jobs ran for nine days reporting green with no coverage number
+      attached to them.
+
+      (The collector is named on the dotnet test command line, not here. It
+      cannot be written in this comment: a double hyphen is illegal inside an
+      XML comment, which is how the first version of this file failed to
+      build.)
+    -->
+    <PackageReference Include="coverlet.collector" Version="10.0.1">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
     <PackageReference Include="FluentAssertions" Version="8.10.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
@@ -18,6 +33,14 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!--
+    One reference, and it is the base of the pyramid stated as a build
+    constraint. This project cannot boot a host, cannot open a database and
+    cannot reach a module's infrastructure, because it does not reference any
+    of them - so every test in it is necessarily about a rule rather than about
+    plumbing. The fastest suite in the repository is fast because of this line,
+    not because of how the tests were written.
+  -->
   <ItemGroup>
     <ProjectReference Include="..\..\src\Modules\Curation\Capstone.Curation.Domain\Capstone.Curation.Domain.csproj" />
   </ItemGroup>

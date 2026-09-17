@@ -208,3 +208,22 @@ internal sealed record CreateCollectionRequest(string CuratorId, string Name);
 internal sealed record AddItemRequest(int QuoteId);
 internal sealed record PublishCollectionRequest(string CuratorId);
 internal sealed record FollowRequest(string CuratorId, string FollowerId);
+
+/// <summary>
+/// Names this entry point so a test host can find it.
+/// </summary>
+/// <remarks>
+/// Top-level statements compile into a class called Program that is internal,
+/// and <c>WebApplicationFactory&lt;T&gt;</c> needs T to be visible from the
+/// test assembly. This empty partial declaration is the entire cost of making
+/// the API testable through real HTTP: no InternalsVisibleTo, no Startup class
+/// extracted for the tests' benefit, and nothing in the request pipeline that
+/// exists only when tests are running.
+///
+/// That last point is the one worth keeping. A test host that has to switch the
+/// app into a special mode is testing the special mode. Capstone.Api.Tests
+/// changes exactly two things about this program - which file SQLite writes to,
+/// and how often the relay polls - and both are settings a deployment could
+/// change too.
+/// </remarks>
+public partial class Program { }
