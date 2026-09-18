@@ -3,8 +3,32 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ContainerRepository>quotes-api</ContainerRepository>
-    <ContainerImageTag>0.1.0</ContainerImageTag>
+
+    <!--
+      Day 32: was 0.1.0 while production ran 0.2.0, because the last two
+      deploys passed -p ContainerImageTag on the command line and nothing
+      wrote the result back here. A version number that only exists in
+      somebody's shell history is not a version number - you cannot look at a
+      commit and say what image it produced.
+
+      0.3.0 rather than 0.2.1: the change it carries is [Authorize] on
+      CollectionsController, which turns seven anonymous endpoints into
+      authenticated ones. That breaks any caller relying on the old behaviour,
+      and the fact that such a caller should never have existed does not make
+      the change compatible.
+    -->
+    <ContainerImageTag>0.3.0</ContainerImageTag>
+
     <ContainerBaseImage>mcr.microsoft.com/dotnet/aspnet:10.0</ContainerBaseImage>
+
+    <!--
+      Known and not fixed today: the container runs as root. The aspnet base
+      image ships a non-root `app` user and this overrides it, which is one
+      line to change and a real risk to change untested on the last day - the
+      app writes a SQLite file in Development and the published image's write
+      permissions have never been exercised under a non-root user. Recorded in
+      STATUS.md with the rest.
+    -->
     <ContainerUser>root</ContainerUser>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

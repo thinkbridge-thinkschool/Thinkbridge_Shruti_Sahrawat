@@ -1,0 +1,16 @@
+<Solution>
+  <Project Path="src/Capstone.Api/Capstone.Api.csproj" />
+  <Project Path="src/Capstone.SharedKernel/Capstone.SharedKernel.csproj" />
+  <Project Path="src/Modules/Catalog/Capstone.Catalog.Contracts/Capstone.Catalog.Contracts.csproj" />
+  <Project Path="src/Modules/Catalog/Capstone.Catalog.Infrastructure/Capstone.Catalog.Infrastructure.csproj" />
+  <Project Path="src/Modules/Curation/Capstone.Curation.Application/Capstone.Curation.Application.csproj" />
+  <Project Path="src/Modules/Curation/Capstone.Curation.Contracts/Capstone.Curation.Contracts.csproj" />
+  <Project Path="src/Modules/Curation/Capstone.Curation.Domain/Capstone.Curation.Domain.csproj" />
+  <Project Path="src/Modules/Curation/Capstone.Curation.Infrastructure/Capstone.Curation.Infrastructure.csproj" />
+  <Project Path="src/Modules/Sharing/Capstone.Sharing.Application/Capstone.Sharing.Application.csproj" />
+  <Project Path="src/Modules/Sharing/Capstone.Sharing.Infrastructure/Capstone.Sharing.Infrastructure.csproj" />
+  <Project Path="tests/Capstone.Api.Tests/Capstone.Api.Tests.csproj" />
+  <Project Path="tests/Capstone.ArchitectureTests/Capstone.ArchitectureTests.csproj" />
+  <Project Path="tests/Capstone.Curation.Domain.Tests/Capstone.Curation.Domain.Tests.csproj" />
+  <Project Path="tests/Capstone.Curation.Infrastructure.Tests/Capstone.Curation.Infrastructure.Tests.csproj" />
+</Solution>

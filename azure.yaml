@@ -1,4 +1,24 @@
-﻿# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+
+# NOT the deployment path for the live resources. See DEPLOYMENT.md.
+#
+# This manifest is left from `azd init` on day 24. The running deployment is
+# Bicep under infra/ plus an image pushed by hand - see DEPLOYMENT.md - and
+# nothing reads this file today.
+#
+# Day 32 removed the `resources` block that used to live here. It pinned
+# ConnectionStrings__Default to sql-quotes2-qvdk5l.database.windows.net with a
+# managed-identity client id, both of them from a subscription that has since
+# been decommissioned. Harmless while nobody ran azd, and a live hazard the
+# moment somebody did: `azd up` would have applied those values over the
+# working configuration and pointed the app at a SQL server that no longer
+# exists. A stale config file is not inert - it is a loaded one.
+#
+# The service mapping below is kept because it is still true about the
+# repository's shape, and because deleting the file outright would make `azd`
+# stop recognising this as an azd project at all, which is a bigger decision
+# than this cleanup needs to make. Anything that actually configures the
+# deployment belongs in infra/ where it is reviewed.
 
 name: repo-live
 metadata:
@@ -8,14 +28,3 @@ services:
         project: QuotesApi
         host: containerapp
         language: dotnet
-resources:
-    quotes-api:
-        type: host.containerapp
-        port: 8080
-        env:
-            - name: ConnectionStrings__Default
-              value: Server=tcp:sql-quotes2-qvdk5l.database.windows.net,1433;Database=quotesdb;Authentication=Active Directory Managed Identity;User Id=b5e81529-a6b9-4a13-ba5a-ce729ef9a3a3;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;
-            - name: Database__Provider
-              value: SqlServer
-            - name: ASPNETCORE_ENVIRONMENT
-              value: Production

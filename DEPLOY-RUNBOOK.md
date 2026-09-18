@@ -1,5 +1,15 @@
 # Deploy runbook — quotes-ui to Azure Static Web Apps
 
+> **Historical, and no longer accurate.** This describes a deployment in a
+> subscription that has since been decommissioned. Every resource name and URL
+> below — `sql-quotes2-qvdk5l`, `quotes-api.blacksand-b575aaa0.southindia.azurecontainerapps.io`,
+> `white-bush-08e3cd710.7.azurestaticapps.net` — no longer resolves.
+>
+> It is kept uncorrected on purpose: it is the evidence for the day it was
+> written, and editing it to name today's resources would misrepresent what was
+> true then. For the current deployment see [DEPLOYMENT.md](DEPLOYMENT.md).
+
+
 Exact commands, in order, for you to run yourself (PowerShell or your usual
 shell, on your machine — not something I can run from this sandbox: see
 `BRIEF-DEPLOY.md` for why). Paste back the marked output after each
