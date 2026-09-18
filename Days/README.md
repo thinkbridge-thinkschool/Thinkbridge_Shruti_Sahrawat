@@ -35,6 +35,7 @@ Quick navigation into each day's brief, code, and evidence. The full narrative (
 | 29 | Build day 1: EF Core persistence for Curation | [`Days/day-29/`](day-29/README.md) |
 | 30 | Build day 2: a real outbox table, non-destructive drain | [`Days/day-30/`](day-30/README.md) |
 | 31 | Polish: tests at every layer, a measured perf pass, a security re-check | [`Days/day-31/`](day-31/README.md) |
+| 32 | Ship + demo + postmortem | [`Days/day-32/`](day-32/README.md) |
 
 Day 6 was a holiday — no exercise that day.
 
@@ -45,3 +46,7 @@ Day 6 was a holiday — no exercise that day.
 - [Bugs these tests caught](reference/bugs-caught.md)
 - [Running it](reference/running-it.md)
 - [Capstone perf: the publish path under load](../capstone/perf/README.md)
+- [Project status: what is finished and what is not](../STATUS.md)
+- [Deployment: the live one](../DEPLOYMENT.md)
+- [Demo](../DEMO.md)
+- [Postmortem](../POSTMORTEM.md)

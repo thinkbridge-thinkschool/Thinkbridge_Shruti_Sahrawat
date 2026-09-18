@@ -1,5 +1,15 @@
 # Verification log — deploy to Azure Static Web Apps
 
+> **Historical, and no longer accurate.** This describes a deployment in a
+> subscription that has since been decommissioned. Every resource name and URL
+> below — `sql-quotes2-qvdk5l`, `quotes-api.blacksand-b575aaa0.southindia.azurecontainerapps.io`,
+> `white-bush-08e3cd710.7.azurestaticapps.net` — no longer resolves.
+>
+> It is kept uncorrected on purpose: it is the evidence for the day it was
+> written, and editing it to name today's resources would misrepresent what was
+> true then. For the current deployment see [DEPLOYMENT.md](DEPLOYMENT.md).
+
+
 Day 17. Draft — half of this can be proven from this sandbox alone, half
 needs the commands in `DEPLOY-RUNBOOK.md` run first. Updated once those come
 back rather than claimed now.
