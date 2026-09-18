@@ -18,6 +18,20 @@ everything on purpose — see [DEPLOYMENT.md](DEPLOYMENT.md) for why, and for wh
 `x-ms-middleware-request-id` in a 401's headers is how you tell the gateway
 apart from the application.
 
+![The deployed app, signed in, showing quotes from Azure SQL](docs/images/live-quotes.png)
+
+Signed in at `/quotes`, and there is more in that screenshot than a list of
+quotes. The `ADMIN` badge is a role claim on a JWT the API minted, resolved
+against `Auth__AdminEmails__0` in the deployed container's environment — so
+the identity chain works end to end: register or sign in against Azure SQL,
+token issued, token validated, role read from configuration rather than from
+the request, and the UI showing a control it only shows to an admin. Each
+`yours` tag is the same principal compared against a quote's owner.
+
+The email address is masked. It is the only piece of personal data on the page
+and a screenshot committed to a repository is a shareable artefact, so it is
+redacted rather than left for whoever clones this next.
+
 ### The part worth watching: a security fix shipping
 
 At 05:05 the public front door returned every collection in the database to
